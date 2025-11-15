@@ -98,6 +98,7 @@ TOOL_VERSION = "0.1.0"
 # Pre-compiled regex patterns for performance
 _COUNTRY_CODE_PATTERN = re.compile(r'^[A-Z]{2}$')
 _LANGUAGE_CODE_PATTERN = re.compile(r'^[a-z]{2}$')
+_API_KEY_PATTERN = re.compile(r"(sk_(?:live|test)_)[A-Za-z0-9]+")
 
 # Global HTTP client cache for connection pooling (keyed by API key)
 # Reusing connections eliminates DNS lookup, TCP handshake, and TLS negotiation overhead
@@ -389,29 +390,36 @@ class ChatAdsClient:
                 if self.config.enable_circuit_breaker and ChatAdsClient._circuit_breaker:
                     ChatAdsClient._circuit_breaker.record_failure()
             else:
-                if response.status_code >= 500 and attempt < self.config.max_retries:
-                    LOGGER.warning(
-                        "ChatAds returned %s, retrying (attempt %s/%s)",
-                        response.status_code,
-                        attempt,
-                        self.config.max_retries,
+                if response.status_code >= 500:
+                    if attempt < self.config.max_retries:
+                        LOGGER.warning(
+                            "ChatAds returned %s, retrying (attempt %s/%s)",
+                            response.status_code,
+                            attempt,
+                            self.config.max_retries,
+                        )
+                        if self.config.enable_circuit_breaker and ChatAdsClient._circuit_breaker:
+                            ChatAdsClient._circuit_breaker.record_failure()
+                        continue
+                    raise ChatAdsAPIError(
+                        "ChatAds returned an internal error.",
+                        code="UPSTREAM_UNAVAILABLE",
+                        status_code=response.status_code,
                     )
-                    if self.config.enable_circuit_breaker and ChatAdsClient._circuit_breaker:
-                        ChatAdsClient._circuit_breaker.record_failure()
-                else:
-                    try:
-                        data = response.json()
-                    except ValueError as exc:
-                        raise ChatAdsAPIError(
-                            "ChatAds returned invalid JSON.",
-                            code="BAD_RESPONSE",
-                            status_code=response.status_code,
-                        ) from exc
-                    # Successful response - record success with circuit breaker
-                    if self.config.enable_circuit_breaker and ChatAdsClient._circuit_breaker:
-                        ChatAdsClient._circuit_breaker.record_success()
-                    _emit_metric("chatads.request.latency_ms", latency_ms, {"status": str(response.status_code)})
-                    return data, response.status_code, latency_ms
+
+                try:
+                    data = response.json()
+                except ValueError as exc:
+                    raise ChatAdsAPIError(
+                        "ChatAds returned invalid JSON.",
+                        code="BAD_RESPONSE",
+                        status_code=response.status_code,
+                    ) from exc
+                # Successful response - record success with circuit breaker
+                if self.config.enable_circuit_breaker and ChatAdsClient._circuit_breaker:
+                    ChatAdsClient._circuit_breaker.record_success()
+                _emit_metric("chatads.request.latency_ms", latency_ms, {"status": str(response.status_code)})
+                return data, response.status_code, latency_ms
 
             if attempt < self.config.max_retries:
                 await asyncio.sleep(delay)
@@ -454,8 +462,7 @@ def _sanitize_error_for_logging(error: Exception) -> str:
     """
     error_str = str(error)
     # Mask API keys
-    error_str = error_str.replace("sk_live_", "sk_live_***")
-    error_str = error_str.replace("sk_test_", "sk_test_***")
+    error_str = _API_KEY_PATTERN.sub(r"\1***", error_str)
     # Mask authorization headers
     if "x-api-key" in error_str.lower():
         error_str = "Request error (details redacted for security)"
@@ -773,8 +780,7 @@ def _error_envelope_from_exc(
     return envelope.model_dump()
 
 
-@mcp.tool()
-async def chatads_affiliate_lookup(
+async def run_chatads_affiliate_lookup(
     message: str,
     ip: Optional[str] = None,
     user_agent: Optional[str] = None,
@@ -839,8 +845,10 @@ async def chatads_affiliate_lookup(
             await client.aclose()
 
 
-@mcp.tool()
-async def chatads_health_check(api_key: Optional[str] = None) -> Dict[str, Any]:
+chatads_affiliate_lookup = mcp.tool()(run_chatads_affiliate_lookup)
+
+
+async def run_chatads_health_check(api_key: Optional[str] = None) -> Dict[str, Any]:
     """
     Check API connectivity and health without consuming quota (async).
 
@@ -930,6 +938,9 @@ async def chatads_health_check(api_key: Optional[str] = None) -> Dict[str, Any]:
     finally:
         if client:
             await client.aclose()
+
+
+chatads_health_check = mcp.tool()(run_chatads_health_check)
 
 
 def main() -> None:

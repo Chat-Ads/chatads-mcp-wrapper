@@ -14,7 +14,7 @@ import asyncio
 import os
 import sys
 
-from chatads_mcp_wrapper import chatads_affiliate_lookup, chatads_health_check
+from chatads_mcp_wrapper import run_chatads_affiliate_lookup, run_chatads_health_check
 
 
 async def test_health_check():
@@ -22,7 +22,7 @@ async def test_health_check():
     print("🏥 Test 1: Health Check")
     print("-" * 50)
 
-    result = await chatads_health_check()
+    result = await run_chatads_health_check()
 
     status_emoji = {"healthy": "✅", "degraded": "⚠️", "unhealthy": "❌"}
     print(f"{status_emoji.get(result['status'], '❓')} Status: {result['status']}")
@@ -43,7 +43,7 @@ async def test_basic_lookup():
     print("🔍 Test 2: Basic Affiliate Lookup")
     print("-" * 50)
 
-    result = await chatads_affiliate_lookup(
+    result = await run_chatads_affiliate_lookup(
         message="best laptop for coding"
     )
 
@@ -91,7 +91,7 @@ async def test_concurrent():
     start = time.perf_counter()
 
     results = await asyncio.gather(*[
-        chatads_affiliate_lookup(message=q)
+        run_chatads_affiliate_lookup(message=q)
         for q in queries
     ])
 
@@ -115,7 +115,7 @@ async def test_error_handling():
     print("-" * 50)
 
     # Test with invalid input (too short)
-    result = await chatads_affiliate_lookup(message="x")
+    result = await run_chatads_affiliate_lookup(message="x")
 
     if result['status'] == 'error':
         print(f"✅ Correctly caught validation error:")

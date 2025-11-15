@@ -6,11 +6,13 @@ Coverage: pytest test_chatads_mcp_wrapper.py --cov=chatads_mcp_wrapper --cov-rep
 """
 
 import os
-from unittest.mock import Mock, patch
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, Mock, patch
 
 import httpx
 import pytest
 
+import chatads_mcp_wrapper as chatads_module
 from chatads_mcp_wrapper import (
     ChatAdsAPIError,
     ChatAdsClient,
@@ -29,6 +31,13 @@ from chatads_mcp_wrapper import (
     _validate_inputs,
     normalize_envelope,
 )
+
+
+@pytest.fixture(autouse=True)
+def reset_client_state():
+    """Ensure HTTP client cache/circuit breaker do not leak between tests."""
+    chatads_module._http_client_cache.clear()
+    ChatAdsClient._circuit_breaker = None
 
 
 class TestSanitization:
@@ -120,15 +129,16 @@ class TestInputValidation:
         _validate_inputs(message, None, None, None, "sk_live_1234567890abcdefghij")
 
     def test_message_too_long_characters(self):
-        message = "a" * 2001
+        message = ("a" * 1001) + " " + ("b" * 1000)
         with pytest.raises(ChatAdsAPIError) as exc_info:
             _validate_inputs(message, None, None, None, "sk_live_1234567890abcdefghij")
         assert exc_info.value.code == "MESSAGE_TOO_LONG"
         assert "2000 character" in str(exc_info.value)
 
     def test_message_exactly_2000_characters(self):
-        # Should pass
-        message = "ab " * 666 + "ab"  # ~2000 chars with 2-word requirement
+        # Should pass with 2 words and exactly 2000 characters
+        message = ("a" * 1000) + " " + ("b" * 999)
+        assert len(message) == 2000
         _validate_inputs(message, None, None, None, "sk_live_1234567890abcdefghij")
 
     # IP validation tests
@@ -420,58 +430,66 @@ class TestChatAdsClient:
     def test_client_initialization_with_api_key(self):
         client = ChatAdsClient("sk_live_test")
         assert client._client.headers["x-api-key"] == "sk_live_test"
-        client.close()
+        assert hasattr(client, "aclose")
 
-    @patch("chatads_mcp_wrapper.httpx.Client")
-    def test_fetch_success(self, mock_client_class):
+    @pytest.mark.asyncio
+    @patch("chatads_mcp_wrapper.httpx.AsyncClient")
+    async def test_fetch_success(self, mock_client_class):
         mock_response = Mock()
         mock_response.status_code = 200
         mock_response.json.return_value = {"success": True, "data": {}}
 
-        mock_client = Mock()
+        mock_client = AsyncMock()
         mock_client.post.return_value = mock_response
         mock_client_class.return_value = mock_client
 
         config = ChatAdsClientConfig(max_retries=3)
         client = ChatAdsClient("sk_test_123", config)
-        data, status_code, latency_ms = client.fetch({"message": "test"})
+        data, status_code, latency_ms = await client.fetch({"message": "test"})
 
         assert data == {"success": True, "data": {}}
         assert status_code == 200
         assert latency_ms > 0
+        await client.aclose()
 
-    @patch("chatads_mcp_wrapper.httpx.Client")
-    def test_fetch_retries_on_timeout(self, mock_client_class):
-        mock_client = Mock()
-        mock_client.post.side_effect = httpx.TimeoutException("Timeout")
+    @pytest.mark.asyncio
+    @patch("chatads_mcp_wrapper.httpx.AsyncClient")
+    async def test_fetch_retries_on_timeout(self, mock_client_class):
+        mock_client = AsyncMock()
+        mock_client.post.side_effect = [
+            httpx.TimeoutException("Timeout"),
+            httpx.TimeoutException("Timeout"),
+        ]
         mock_client_class.return_value = mock_client
 
-        config = ChatAdsClientConfig(max_retries=2, backoff_seconds=0.01)
+        config = ChatAdsClientConfig(max_retries=2, backoff_seconds=0.0)
         client = ChatAdsClient("sk_test_123", config)
 
         with pytest.raises(ChatAdsAPIError) as exc_info:
-            client.fetch({"message": "test"})
+            await client.fetch({"message": "test"})
 
         assert exc_info.value.code == "UPSTREAM_UNAVAILABLE"
         assert mock_client.post.call_count == 2
 
-    @patch("chatads_mcp_wrapper.httpx.Client")
-    def test_fetch_retries_on_500_error(self, mock_client_class):
+    @pytest.mark.asyncio
+    @patch("chatads_mcp_wrapper.httpx.AsyncClient")
+    async def test_fetch_retries_on_500_error(self, mock_client_class):
         mock_response = Mock()
         mock_response.status_code = 500
         mock_response.json.return_value = {"error": "Internal server error"}
 
-        mock_client = Mock()
-        mock_client.post.return_value = mock_response
+        mock_client = AsyncMock()
+        mock_client.post.side_effect = [mock_response, mock_response, mock_response]
         mock_client_class.return_value = mock_client
 
-        config = ChatAdsClientConfig(max_retries=2, backoff_seconds=0.01)
+        config = ChatAdsClientConfig(max_retries=2, backoff_seconds=0.0)
         client = ChatAdsClient("sk_test_123", config)
-        data, status_code, _ = client.fetch({"message": "test"})
 
-        # Should retry once then return the error response
+        with pytest.raises(ChatAdsAPIError) as exc_info:
+            await client.fetch({"message": "test"})
+
+        assert exc_info.value.code == "UPSTREAM_UNAVAILABLE"
         assert mock_client.post.call_count == 2
-        assert status_code == 500
 
 
 class TestChatAdsAPIError:
@@ -677,8 +695,9 @@ class TestQuotaWarnings:
 class TestIntegrationWithMockedHTTP:
     """Integration tests with mocked HTTP responses."""
 
-    @patch("chatads_mcp_wrapper.httpx.Client")
-    def test_successful_match_end_to_end(self, mock_client_class, monkeypatch):
+    @pytest.mark.asyncio
+    @patch("chatads_mcp_wrapper.httpx.AsyncClient")
+    async def test_successful_match_end_to_end(self, mock_client_class, monkeypatch):
         """Test complete flow with successful product match."""
         monkeypatch.setenv("CHATADS_API_KEY", "sk_live_test1234567890abcdef")
 
@@ -714,13 +733,13 @@ class TestIntegrationWithMockedHTTP:
             },
         }
 
-        mock_client = Mock()
+        mock_client = AsyncMock()
         mock_client.post.return_value = mock_response
         mock_client_class.return_value = mock_client
 
-        from chatads_mcp_wrapper import chatads_affiliate_lookup
+        from chatads_mcp_wrapper import run_chatads_affiliate_lookup
 
-        result = chatads_affiliate_lookup("best laptop for coding")
+        result = await run_chatads_affiliate_lookup("best laptop for coding")
 
         assert result["status"] == "success"
         assert result["matched"] is True
@@ -728,8 +747,9 @@ class TestIntegrationWithMockedHTTP:
         assert result["affiliate_link"] == "https://amazon.com/macbook-pro"
         assert result["metadata"]["request_id"] == "req_abc123"
 
-    @patch("chatads_mcp_wrapper.httpx.Client")
-    def test_no_match_end_to_end(self, mock_client_class, monkeypatch):
+    @pytest.mark.asyncio
+    @patch("chatads_mcp_wrapper.httpx.AsyncClient")
+    async def test_no_match_end_to_end(self, mock_client_class, monkeypatch):
         """Test complete flow with no match."""
         monkeypatch.setenv("CHATADS_API_KEY", "sk_live_test1234567890abcdef")
 
@@ -744,20 +764,21 @@ class TestIntegrationWithMockedHTTP:
             "meta": {"request_id": "req_xyz789"},
         }
 
-        mock_client = Mock()
+        mock_client = AsyncMock()
         mock_client.post.return_value = mock_response
         mock_client_class.return_value = mock_client
 
-        from chatads_mcp_wrapper import chatads_affiliate_lookup
+        from chatads_mcp_wrapper import run_chatads_affiliate_lookup
 
-        result = chatads_affiliate_lookup("random text here")
+        result = await run_chatads_affiliate_lookup("random text here")
 
         assert result["status"] == "no_match"
         assert result["matched"] is False
         assert "No match" in result["reason"]
 
-    @patch("chatads_mcp_wrapper.httpx.Client")
-    def test_quota_exceeded_end_to_end(self, mock_client_class, monkeypatch):
+    @pytest.mark.asyncio
+    @patch("chatads_mcp_wrapper.httpx.AsyncClient")
+    async def test_quota_exceeded_end_to_end(self, mock_client_class, monkeypatch):
         """Test complete flow with quota exceeded error."""
         monkeypatch.setenv("CHATADS_API_KEY", "sk_live_test1234567890abcdef")
 
@@ -772,24 +793,25 @@ class TestIntegrationWithMockedHTTP:
             "meta": {"request_id": "req_quota123"},
         }
 
-        mock_client = Mock()
+        mock_client = AsyncMock()
         mock_client.post.return_value = mock_response
         mock_client_class.return_value = mock_client
 
-        from chatads_mcp_wrapper import chatads_affiliate_lookup
+        from chatads_mcp_wrapper import run_chatads_affiliate_lookup
 
-        result = chatads_affiliate_lookup("best laptop")
+        result = await run_chatads_affiliate_lookup("best laptop")
 
         assert result["status"] == "error"
         assert result["error_code"] == "QUOTA_EXCEEDED"
         assert "Monthly quota" in result["error_message"]
 
-    @patch("chatads_mcp_wrapper.httpx.Client")
-    def test_network_timeout_with_retry(self, mock_client_class, monkeypatch):
+    @pytest.mark.asyncio
+    @patch("chatads_mcp_wrapper.httpx.AsyncClient")
+    async def test_network_timeout_with_retry(self, mock_client_class, monkeypatch):
         """Test retry logic on network timeout."""
         monkeypatch.setenv("CHATADS_API_KEY", "sk_live_test1234567890abcdef")
 
-        mock_client = Mock()
+        mock_client = AsyncMock()
         # First two calls timeout, third succeeds
         mock_client.post.side_effect = [
             httpx.TimeoutException("Timeout"),
@@ -805,15 +827,16 @@ class TestIntegrationWithMockedHTTP:
         ]
         mock_client_class.return_value = mock_client
 
-        from chatads_mcp_wrapper import chatads_affiliate_lookup
+        from chatads_mcp_wrapper import run_chatads_affiliate_lookup
 
-        result = chatads_affiliate_lookup("test message")
+        result = await run_chatads_affiliate_lookup("test message")
 
         assert result["status"] == "no_match"
         assert mock_client.post.call_count == 3  # Retried twice, succeeded on third
 
-    @patch("chatads_mcp_wrapper.httpx.Client")
-    def test_invalid_api_key_end_to_end(self, mock_client_class, monkeypatch):
+    @pytest.mark.asyncio
+    @patch("chatads_mcp_wrapper.httpx.AsyncClient")
+    async def test_invalid_api_key_end_to_end(self, mock_client_class, monkeypatch):
         """Test flow with invalid API key."""
         monkeypatch.setenv("CHATADS_API_KEY", "sk_live_test1234567890abcdef")
 
@@ -828,53 +851,55 @@ class TestIntegrationWithMockedHTTP:
             "meta": {"request_id": "req_forbidden"},
         }
 
-        mock_client = Mock()
+        mock_client = AsyncMock()
         mock_client.post.return_value = mock_response
         mock_client_class.return_value = mock_client
 
-        from chatads_mcp_wrapper import chatads_affiliate_lookup
+        from chatads_mcp_wrapper import run_chatads_affiliate_lookup
 
-        result = chatads_affiliate_lookup("test message")
+        result = await run_chatads_affiliate_lookup("test message")
 
         assert result["status"] == "error"
         assert result["error_code"] == "FORBIDDEN"
 
-    @patch("chatads_mcp_wrapper.httpx.Client")
-    def test_invalid_input_fails_before_api_call(self, mock_client_class, monkeypatch):
+    @pytest.mark.asyncio
+    @patch("chatads_mcp_wrapper.httpx.AsyncClient")
+    async def test_invalid_input_fails_before_api_call(self, mock_client_class, monkeypatch):
         """Test that validation errors don't make API calls."""
         monkeypatch.setenv("CHATADS_API_KEY", "sk_live_test1234567890abcdef")
 
-        mock_client = Mock()
+        mock_client = AsyncMock()
         mock_client_class.return_value = mock_client
 
-        from chatads_mcp_wrapper import chatads_affiliate_lookup
+        from chatads_mcp_wrapper import run_chatads_affiliate_lookup
 
-        # Invalid country code
-        result = chatads_affiliate_lookup("test message", country="USA")
+        result = await run_chatads_affiliate_lookup("test message", country="USA")
 
         assert result["status"] == "error"
         assert result["error_code"] == "INVALID_INPUT"
         # API should NOT have been called
         assert mock_client.post.call_count == 0
 
-    def test_missing_api_key(self, monkeypatch):
+    @pytest.mark.asyncio
+    async def test_missing_api_key(self, monkeypatch):
         """Test that missing API key fails gracefully."""
         monkeypatch.delenv("CHATADS_API_KEY", raising=False)
 
-        from chatads_mcp_wrapper import chatads_affiliate_lookup
+        from chatads_mcp_wrapper import run_chatads_affiliate_lookup
 
-        result = chatads_affiliate_lookup("test message")
+        result = await run_chatads_affiliate_lookup("test message")
 
         assert result["status"] == "error"
         assert result["error_code"] == "CONFIGURATION_ERROR"
         assert "API key" in result["error_message"]
 
-    @patch("chatads_mcp_wrapper.httpx.Client")
-    def test_server_error_with_retry(self, mock_client_class, monkeypatch):
+    @pytest.mark.asyncio
+    @patch("chatads_mcp_wrapper.httpx.AsyncClient")
+    async def test_server_error_with_retry(self, mock_client_class, monkeypatch):
         """Test retry logic on 500 server errors."""
         monkeypatch.setenv("CHATADS_API_KEY", "sk_live_test1234567890abcdef")
 
-        mock_client = Mock()
+        mock_client = AsyncMock()
         # First call returns 500, second succeeds
         mock_client.post.side_effect = [
             Mock(status_code=500, json=lambda: {"error": "Internal Server Error"}),
@@ -889,12 +914,107 @@ class TestIntegrationWithMockedHTTP:
         ]
         mock_client_class.return_value = mock_client
 
-        from chatads_mcp_wrapper import chatads_affiliate_lookup
+        from chatads_mcp_wrapper import run_chatads_affiliate_lookup
 
-        result = chatads_affiliate_lookup("test message")
+        result = await run_chatads_affiliate_lookup("test message")
 
         assert result["status"] == "no_match"
         assert mock_client.post.call_count == 2  # Retried once
+
+
+class TestHealthCheck:
+    """Validate run_chatads_health_check helper."""
+
+    @pytest.mark.asyncio
+    async def test_health_check_success(self, monkeypatch):
+        monkeypatch.setenv("CHATADS_API_KEY", "sk_live_test1234567890abcdef")
+
+        class DummyClient:
+            _circuit_breaker = None
+
+            def __init__(self, api_key):
+                self.config = SimpleNamespace(
+                    base_url="https://example.com",
+                    endpoint="/v1/test",
+                    enable_circuit_breaker=False,
+                )
+
+            async def fetch(self, payload):
+                return {"success": True}, 200, 42.0
+
+            async def aclose(self):
+                return None
+
+        monkeypatch.setattr(chatads_module, "ChatAdsClient", DummyClient)
+
+        result = await chatads_module.run_chatads_health_check()
+        assert result["status"] == "healthy"
+        assert result["api_reachable"] is True
+        assert result["circuit_breaker_state"] == "disabled"
+
+    @pytest.mark.asyncio
+    async def test_health_check_degraded(self, monkeypatch):
+        monkeypatch.setenv("CHATADS_API_KEY", "sk_live_test1234567890abcdef")
+
+        class DummyClient:
+            _circuit_breaker = None
+
+            def __init__(self, api_key):
+                self.config = SimpleNamespace(
+                    base_url="https://example.com",
+                    endpoint="/v1/test",
+                    enable_circuit_breaker=False,
+                )
+
+            async def fetch(self, payload):
+                raise ChatAdsAPIError("invalid-input", code="INVALID_INPUT", status_code=400)
+
+            async def aclose(self):
+                return None
+
+        monkeypatch.setattr(chatads_module, "ChatAdsClient", DummyClient)
+
+        result = await chatads_module.run_chatads_health_check()
+        assert result["status"] == "degraded"
+        assert result["api_reachable"] is True
+        assert result["error_code"] == "INVALID_INPUT"
+
+    @pytest.mark.asyncio
+    async def test_health_check_circuit_breaker_open(self, monkeypatch):
+        monkeypatch.setenv("CHATADS_API_KEY", "sk_live_test1234567890abcdef")
+
+        class DummyBreaker:
+            def __init__(self, state: str):
+                self._state = state
+
+            def is_available(self) -> bool:
+                return False
+
+            def get_state(self):
+                return SimpleNamespace(value=self._state)
+
+        class DummyClient:
+            _circuit_breaker = DummyBreaker("open")
+
+            def __init__(self, api_key):
+                self.config = SimpleNamespace(
+                    base_url="https://example.com",
+                    endpoint="/v1/test",
+                    enable_circuit_breaker=True,
+                )
+
+            async def fetch(self, payload):
+                raise AssertionError("should not be called when circuit breaker open")
+
+            async def aclose(self):
+                return None
+
+        monkeypatch.setattr(chatads_module, "ChatAdsClient", DummyClient)
+
+        result = await chatads_module.run_chatads_health_check()
+        assert result["status"] == "unhealthy"
+        assert result["api_reachable"] is False
+        assert result["circuit_breaker_state"] == "open"
 
 
 if __name__ == "__main__":
