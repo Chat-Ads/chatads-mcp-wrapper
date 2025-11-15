@@ -20,6 +20,7 @@ from chatads_mcp_wrapper import (
     CircuitBreaker,
     CircuitState,
     ToolEnvelope,
+    _API_KEY_REDACTION,
     _build_metadata,
     _build_request_payload,
     _check_quota_warnings,
@@ -43,20 +44,15 @@ def reset_client_state():
 class TestSanitization:
     """Test error message sanitization to prevent data leaks."""
 
-    def test_sanitize_live_api_key(self):
-        error = Exception("Failed with key sk_live_1234567890abcdef")
-        result = _sanitize_error_for_logging(error)
-        assert "sk_live_***" in result
-        assert "1234567890abcdef" not in result
-
-    def test_sanitize_test_api_key(self):
-        error = Exception("Failed with key sk_test_abcdefghijk")
-        result = _sanitize_error_for_logging(error)
-        assert "sk_test_***" in result
-        assert "abcdefghijk" not in result
+    def test_sanitize_masks_provided_api_key(self):
+        api_key = "my-secret-api-key"
+        error = Exception(f"Failed with key {api_key}")
+        result = _sanitize_error_for_logging(error, api_key=api_key)
+        assert _API_KEY_REDACTION in result
+        assert api_key not in result
 
     def test_sanitize_api_key_header(self):
-        error = Exception("Request failed with x-api-key: sk_live_secret")
+        error = Exception("Request failed with x-api-key: some_key")
         result = _sanitize_error_for_logging(error)
         assert result == "Request error (details redacted for security)"
 
@@ -81,7 +77,7 @@ class TestInputValidation:
             ip="8.8.8.8",
             country="US",
             language="en",
-            api_key="sk_live_1234567890abcdefghij",
+            api_key="mock_api_key_1234567890abcdefghij",
         )
 
     def test_valid_inputs_minimal(self):
@@ -91,47 +87,47 @@ class TestInputValidation:
             ip=None,
             country=None,
             language=None,
-            api_key="sk_test_1234567890abcdefghij",
+            api_key="mock_api_key_1234567890abcdefghij",
         )
 
     # Message validation tests
     def test_empty_message(self):
         with pytest.raises(ChatAdsAPIError) as exc_info:
-            _validate_inputs("", None, None, None, "sk_live_1234567890abcdefghij")
+            _validate_inputs("", None, None, None, "mock_api_key_1234567890abcdefghij")
         assert exc_info.value.code == "INVALID_INPUT"
         assert "empty" in str(exc_info.value).lower()
 
     def test_whitespace_only_message(self):
         with pytest.raises(ChatAdsAPIError) as exc_info:
-            _validate_inputs("   ", None, None, None, "sk_live_1234567890abcdefghij")
+            _validate_inputs("   ", None, None, None, "mock_api_key_1234567890abcdefghij")
         assert exc_info.value.code == "INVALID_INPUT"
 
     def test_message_too_short_one_word(self):
         with pytest.raises(ChatAdsAPIError) as exc_info:
-            _validate_inputs("laptop", None, None, None, "sk_live_1234567890abcdefghij")
+            _validate_inputs("laptop", None, None, None, "mock_api_key_1234567890abcdefghij")
         assert exc_info.value.code == "MESSAGE_TOO_SHORT"
         assert "2 words" in str(exc_info.value)
 
     def test_message_exactly_two_words(self):
         # Should pass
-        _validate_inputs("laptop recommendations", None, None, None, "sk_live_1234567890abcdefghij")
+        _validate_inputs("laptop recommendations", None, None, None, "mock_api_key_1234567890abcdefghij")
 
     def test_message_too_many_words(self):
         message = " ".join(["word"] * 101)
         with pytest.raises(ChatAdsAPIError) as exc_info:
-            _validate_inputs(message, None, None, None, "sk_live_1234567890abcdefghij")
+            _validate_inputs(message, None, None, None, "mock_api_key_1234567890abcdefghij")
         assert exc_info.value.code == "MESSAGE_TOO_MANY_WORDS"
         assert "100 word" in str(exc_info.value)
 
     def test_message_exactly_100_words(self):
         # Should pass
         message = " ".join(["word"] * 100)
-        _validate_inputs(message, None, None, None, "sk_live_1234567890abcdefghij")
+        _validate_inputs(message, None, None, None, "mock_api_key_1234567890abcdefghij")
 
     def test_message_too_long_characters(self):
         message = ("a" * 1001) + " " + ("b" * 1000)
         with pytest.raises(ChatAdsAPIError) as exc_info:
-            _validate_inputs(message, None, None, None, "sk_live_1234567890abcdefghij")
+            _validate_inputs(message, None, None, None, "mock_api_key_1234567890abcdefghij")
         assert exc_info.value.code == "MESSAGE_TOO_LONG"
         assert "2000 character" in str(exc_info.value)
 
@@ -139,100 +135,85 @@ class TestInputValidation:
         # Should pass with 2 words and exactly 2000 characters
         message = ("a" * 1000) + " " + ("b" * 999)
         assert len(message) == 2000
-        _validate_inputs(message, None, None, None, "sk_live_1234567890abcdefghij")
+        _validate_inputs(message, None, None, None, "mock_api_key_1234567890abcdefghij")
 
     # IP validation tests
     def test_valid_ipv4(self):
-        _validate_inputs("test message", "192.168.1.1", None, None, "sk_live_1234567890abcdefghij")
+        _validate_inputs("test message", "192.168.1.1", None, None, "mock_api_key_1234567890abcdefghij")
 
     def test_valid_ipv6(self):
-        _validate_inputs("test message", "2001:0db8::1", None, None, "sk_live_1234567890abcdefghij")
+        _validate_inputs("test message", "2001:0db8::1", None, None, "mock_api_key_1234567890abcdefghij")
 
     def test_invalid_ip_localhost(self):
         with pytest.raises(ChatAdsAPIError) as exc_info:
-            _validate_inputs("test message", "localhost", None, None, "sk_live_1234567890abcdefghij")
+            _validate_inputs("test message", "localhost", None, None, "mock_api_key_1234567890abcdefghij")
         assert exc_info.value.code == "INVALID_INPUT"
         assert "Invalid IP" in str(exc_info.value)
 
     def test_invalid_ip_incomplete(self):
         with pytest.raises(ChatAdsAPIError) as exc_info:
-            _validate_inputs("test message", "192.168.1", None, None, "sk_live_1234567890abcdefghij")
+            _validate_inputs("test message", "192.168.1", None, None, "mock_api_key_1234567890abcdefghij")
         assert exc_info.value.code == "INVALID_INPUT"
 
     def test_invalid_ip_text(self):
         with pytest.raises(ChatAdsAPIError) as exc_info:
-            _validate_inputs("test message", "not.an.ip", None, None, "sk_live_1234567890abcdefghij")
+            _validate_inputs("test message", "not.an.ip", None, None, "mock_api_key_1234567890abcdefghij")
         assert exc_info.value.code == "INVALID_INPUT"
 
     # Country validation tests
     def test_valid_country_us(self):
-        _validate_inputs("test message", None, "US", None, "sk_live_1234567890abcdefghij")
+        _validate_inputs("test message", None, "US", None, "mock_api_key_1234567890abcdefghij")
 
     def test_valid_country_gb(self):
-        _validate_inputs("test message", None, "GB", None, "sk_live_1234567890abcdefghij")
+        _validate_inputs("test message", None, "GB", None, "mock_api_key_1234567890abcdefghij")
 
     def test_invalid_country_lowercase(self):
         with pytest.raises(ChatAdsAPIError) as exc_info:
-            _validate_inputs("test message", None, "us", None, "sk_live_1234567890abcdefghij")
+            _validate_inputs("test message", None, "us", None, "mock_api_key_1234567890abcdefghij")
         assert exc_info.value.code == "INVALID_INPUT"
         assert "ISO 3166-1" in str(exc_info.value)
 
     def test_invalid_country_three_letters(self):
         with pytest.raises(ChatAdsAPIError) as exc_info:
-            _validate_inputs("test message", None, "USA", None, "sk_live_1234567890abcdefghij")
+            _validate_inputs("test message", None, "USA", None, "mock_api_key_1234567890abcdefghij")
         assert exc_info.value.code == "INVALID_INPUT"
 
     def test_invalid_country_full_name(self):
         with pytest.raises(ChatAdsAPIError) as exc_info:
-            _validate_inputs("test message", None, "United States", None, "sk_live_1234567890abcdefghij")
+            _validate_inputs("test message", None, "United States", None, "mock_api_key_1234567890abcdefghij")
         assert exc_info.value.code == "INVALID_INPUT"
 
     def test_invalid_country_one_letter(self):
         with pytest.raises(ChatAdsAPIError) as exc_info:
-            _validate_inputs("test message", None, "U", None, "sk_live_1234567890abcdefghij")
+            _validate_inputs("test message", None, "U", None, "mock_api_key_1234567890abcdefghij")
         assert exc_info.value.code == "INVALID_INPUT"
 
     # Language validation tests
     def test_valid_language_en(self):
-        _validate_inputs("test message", None, None, "en", "sk_live_1234567890abcdefghij")
+        _validate_inputs("test message", None, None, "en", "mock_api_key_1234567890abcdefghij")
 
     def test_valid_language_es(self):
-        _validate_inputs("test message", None, None, "es", "sk_live_1234567890abcdefghij")
+        _validate_inputs("test message", None, None, "es", "mock_api_key_1234567890abcdefghij")
 
     def test_invalid_language_uppercase(self):
         with pytest.raises(ChatAdsAPIError) as exc_info:
-            _validate_inputs("test message", None, None, "EN", "sk_live_1234567890abcdefghij")
+            _validate_inputs("test message", None, None, "EN", "mock_api_key_1234567890abcdefghij")
         assert exc_info.value.code == "INVALID_INPUT"
         assert "ISO 639-1" in str(exc_info.value)
 
     def test_invalid_language_three_letters(self):
         with pytest.raises(ChatAdsAPIError) as exc_info:
-            _validate_inputs("test message", None, None, "eng", "sk_live_1234567890abcdefghij")
+            _validate_inputs("test message", None, None, "eng", "mock_api_key_1234567890abcdefghij")
         assert exc_info.value.code == "INVALID_INPUT"
 
     def test_invalid_language_full_name(self):
         with pytest.raises(ChatAdsAPIError) as exc_info:
-            _validate_inputs("test message", None, None, "English", "sk_live_1234567890abcdefghij")
+            _validate_inputs("test message", None, None, "English", "mock_api_key_1234567890abcdefghij")
         assert exc_info.value.code == "INVALID_INPUT"
 
     # API key validation tests
-    def test_valid_api_key_live(self):
-        _validate_inputs("test message", None, None, None, "sk_live_1234567890abcdefghij")
-
-    def test_valid_api_key_test(self):
-        _validate_inputs("test message", None, None, None, "sk_test_1234567890abcdefghij")
-
-    def test_invalid_api_key_wrong_prefix(self):
-        with pytest.raises(ChatAdsAPIError) as exc_info:
-            _validate_inputs("test message", None, None, None, "api_key_1234567890")
-        assert exc_info.value.code == "CONFIGURATION_ERROR"
-        assert "sk_live_" in str(exc_info.value) or "sk_test_" in str(exc_info.value)
-
-    def test_invalid_api_key_too_short(self):
-        with pytest.raises(ChatAdsAPIError) as exc_info:
-            _validate_inputs("test message", None, None, None, "sk_live_123")
-        assert exc_info.value.code == "CONFIGURATION_ERROR"
-        assert "too short" in str(exc_info.value).lower()
+    def test_valid_api_key_generic(self):
+        _validate_inputs("test message", None, None, None, "my_api_key_value")
 
     def test_invalid_api_key_empty(self):
         with pytest.raises(ChatAdsAPIError) as exc_info:
@@ -314,13 +295,13 @@ class TestAPIKeyResolution:
     """Test API key resolution logic."""
 
     def test_resolve_from_parameter(self):
-        result = _resolve_api_key("sk_live_from_param")
-        assert result == "sk_live_from_param"
+        result = _resolve_api_key("mock_api_key_from_param")
+        assert result == "mock_api_key_from_param"
 
     def test_resolve_from_environment(self, monkeypatch):
-        monkeypatch.setenv("CHATADS_API_KEY", "sk_live_from_env")
+        monkeypatch.setenv("CHATADS_API_KEY", "mock_api_key_from_env")
         result = _resolve_api_key(None)
-        assert result == "sk_live_from_env"
+        assert result == "mock_api_key_from_env"
 
     def test_resolve_missing_raises(self, monkeypatch):
         monkeypatch.delenv("CHATADS_API_KEY", raising=False)
@@ -428,8 +409,8 @@ class TestChatAdsClient:
         assert exc_info.value.code == "CONFIGURATION_ERROR"
 
     def test_client_initialization_with_api_key(self):
-        client = ChatAdsClient("sk_live_test")
-        assert client._client.headers["x-api-key"] == "sk_live_test"
+        client = ChatAdsClient("mock_api_key_test")
+        assert client._client.headers["x-api-key"] == "mock_api_key_test"
         assert hasattr(client, "aclose")
 
     @pytest.mark.asyncio
@@ -444,7 +425,7 @@ class TestChatAdsClient:
         mock_client_class.return_value = mock_client
 
         config = ChatAdsClientConfig(max_retries=3)
-        client = ChatAdsClient("sk_test_123", config)
+        client = ChatAdsClient("mock_api_key_123", config)
         data, status_code, latency_ms = await client.fetch({"message": "test"})
 
         assert data == {"success": True, "data": {}}
@@ -463,7 +444,7 @@ class TestChatAdsClient:
         mock_client_class.return_value = mock_client
 
         config = ChatAdsClientConfig(max_retries=2, backoff_seconds=0.0)
-        client = ChatAdsClient("sk_test_123", config)
+        client = ChatAdsClient("mock_api_key_123", config)
 
         with pytest.raises(ChatAdsAPIError) as exc_info:
             await client.fetch({"message": "test"})
@@ -483,7 +464,7 @@ class TestChatAdsClient:
         mock_client_class.return_value = mock_client
 
         config = ChatAdsClientConfig(max_retries=2, backoff_seconds=0.0)
-        client = ChatAdsClient("sk_test_123", config)
+        client = ChatAdsClient("mock_api_key_123", config)
 
         with pytest.raises(ChatAdsAPIError) as exc_info:
             await client.fetch({"message": "test"})
@@ -699,7 +680,7 @@ class TestIntegrationWithMockedHTTP:
     @patch("chatads_mcp_wrapper.httpx.AsyncClient")
     async def test_successful_match_end_to_end(self, mock_client_class, monkeypatch):
         """Test complete flow with successful product match."""
-        monkeypatch.setenv("CHATADS_API_KEY", "sk_live_test1234567890abcdef")
+        monkeypatch.setenv("CHATADS_API_KEY", "mock_api_key_test1234567890abcdef")
 
         mock_response = Mock()
         mock_response.status_code = 200
@@ -737,9 +718,9 @@ class TestIntegrationWithMockedHTTP:
         mock_client.post.return_value = mock_response
         mock_client_class.return_value = mock_client
 
-        from chatads_mcp_wrapper import run_chatads_affiliate_lookup
+        from chatads_mcp_wrapper import run_chatads_message_send
 
-        result = await run_chatads_affiliate_lookup("best laptop for coding")
+        result = await run_chatads_message_send("best laptop for coding")
 
         assert result["status"] == "success"
         assert result["matched"] is True
@@ -751,7 +732,7 @@ class TestIntegrationWithMockedHTTP:
     @patch("chatads_mcp_wrapper.httpx.AsyncClient")
     async def test_no_match_end_to_end(self, mock_client_class, monkeypatch):
         """Test complete flow with no match."""
-        monkeypatch.setenv("CHATADS_API_KEY", "sk_live_test1234567890abcdef")
+        monkeypatch.setenv("CHATADS_API_KEY", "mock_api_key_test1234567890abcdef")
 
         mock_response = Mock()
         mock_response.status_code = 200
@@ -768,9 +749,9 @@ class TestIntegrationWithMockedHTTP:
         mock_client.post.return_value = mock_response
         mock_client_class.return_value = mock_client
 
-        from chatads_mcp_wrapper import run_chatads_affiliate_lookup
+        from chatads_mcp_wrapper import run_chatads_message_send
 
-        result = await run_chatads_affiliate_lookup("random text here")
+        result = await run_chatads_message_send("random text here")
 
         assert result["status"] == "no_match"
         assert result["matched"] is False
@@ -780,7 +761,7 @@ class TestIntegrationWithMockedHTTP:
     @patch("chatads_mcp_wrapper.httpx.AsyncClient")
     async def test_quota_exceeded_end_to_end(self, mock_client_class, monkeypatch):
         """Test complete flow with quota exceeded error."""
-        monkeypatch.setenv("CHATADS_API_KEY", "sk_live_test1234567890abcdef")
+        monkeypatch.setenv("CHATADS_API_KEY", "mock_api_key_test1234567890abcdef")
 
         mock_response = Mock()
         mock_response.status_code = 429
@@ -797,9 +778,9 @@ class TestIntegrationWithMockedHTTP:
         mock_client.post.return_value = mock_response
         mock_client_class.return_value = mock_client
 
-        from chatads_mcp_wrapper import run_chatads_affiliate_lookup
+        from chatads_mcp_wrapper import run_chatads_message_send
 
-        result = await run_chatads_affiliate_lookup("best laptop")
+        result = await run_chatads_message_send("best laptop")
 
         assert result["status"] == "error"
         assert result["error_code"] == "QUOTA_EXCEEDED"
@@ -809,7 +790,7 @@ class TestIntegrationWithMockedHTTP:
     @patch("chatads_mcp_wrapper.httpx.AsyncClient")
     async def test_network_timeout_with_retry(self, mock_client_class, monkeypatch):
         """Test retry logic on network timeout."""
-        monkeypatch.setenv("CHATADS_API_KEY", "sk_live_test1234567890abcdef")
+        monkeypatch.setenv("CHATADS_API_KEY", "mock_api_key_test1234567890abcdef")
 
         mock_client = AsyncMock()
         # First two calls timeout, third succeeds
@@ -827,9 +808,9 @@ class TestIntegrationWithMockedHTTP:
         ]
         mock_client_class.return_value = mock_client
 
-        from chatads_mcp_wrapper import run_chatads_affiliate_lookup
+        from chatads_mcp_wrapper import run_chatads_message_send
 
-        result = await run_chatads_affiliate_lookup("test message")
+        result = await run_chatads_message_send("test message")
 
         assert result["status"] == "no_match"
         assert mock_client.post.call_count == 3  # Retried twice, succeeded on third
@@ -838,7 +819,7 @@ class TestIntegrationWithMockedHTTP:
     @patch("chatads_mcp_wrapper.httpx.AsyncClient")
     async def test_invalid_api_key_end_to_end(self, mock_client_class, monkeypatch):
         """Test flow with invalid API key."""
-        monkeypatch.setenv("CHATADS_API_KEY", "sk_live_test1234567890abcdef")
+        monkeypatch.setenv("CHATADS_API_KEY", "mock_api_key_test1234567890abcdef")
 
         mock_response = Mock()
         mock_response.status_code = 403
@@ -855,9 +836,9 @@ class TestIntegrationWithMockedHTTP:
         mock_client.post.return_value = mock_response
         mock_client_class.return_value = mock_client
 
-        from chatads_mcp_wrapper import run_chatads_affiliate_lookup
+        from chatads_mcp_wrapper import run_chatads_message_send
 
-        result = await run_chatads_affiliate_lookup("test message")
+        result = await run_chatads_message_send("test message")
 
         assert result["status"] == "error"
         assert result["error_code"] == "FORBIDDEN"
@@ -866,14 +847,14 @@ class TestIntegrationWithMockedHTTP:
     @patch("chatads_mcp_wrapper.httpx.AsyncClient")
     async def test_invalid_input_fails_before_api_call(self, mock_client_class, monkeypatch):
         """Test that validation errors don't make API calls."""
-        monkeypatch.setenv("CHATADS_API_KEY", "sk_live_test1234567890abcdef")
+        monkeypatch.setenv("CHATADS_API_KEY", "mock_api_key_test1234567890abcdef")
 
         mock_client = AsyncMock()
         mock_client_class.return_value = mock_client
 
-        from chatads_mcp_wrapper import run_chatads_affiliate_lookup
+        from chatads_mcp_wrapper import run_chatads_message_send
 
-        result = await run_chatads_affiliate_lookup("test message", country="USA")
+        result = await run_chatads_message_send("test message", country="USA")
 
         assert result["status"] == "error"
         assert result["error_code"] == "INVALID_INPUT"
@@ -885,9 +866,9 @@ class TestIntegrationWithMockedHTTP:
         """Test that missing API key fails gracefully."""
         monkeypatch.delenv("CHATADS_API_KEY", raising=False)
 
-        from chatads_mcp_wrapper import run_chatads_affiliate_lookup
+        from chatads_mcp_wrapper import run_chatads_message_send
 
-        result = await run_chatads_affiliate_lookup("test message")
+        result = await run_chatads_message_send("test message")
 
         assert result["status"] == "error"
         assert result["error_code"] == "CONFIGURATION_ERROR"
@@ -897,7 +878,7 @@ class TestIntegrationWithMockedHTTP:
     @patch("chatads_mcp_wrapper.httpx.AsyncClient")
     async def test_server_error_with_retry(self, mock_client_class, monkeypatch):
         """Test retry logic on 500 server errors."""
-        monkeypatch.setenv("CHATADS_API_KEY", "sk_live_test1234567890abcdef")
+        monkeypatch.setenv("CHATADS_API_KEY", "mock_api_key_test1234567890abcdef")
 
         mock_client = AsyncMock()
         # First call returns 500, second succeeds
@@ -914,9 +895,9 @@ class TestIntegrationWithMockedHTTP:
         ]
         mock_client_class.return_value = mock_client
 
-        from chatads_mcp_wrapper import run_chatads_affiliate_lookup
+        from chatads_mcp_wrapper import run_chatads_message_send
 
-        result = await run_chatads_affiliate_lookup("test message")
+        result = await run_chatads_message_send("test message")
 
         assert result["status"] == "no_match"
         assert mock_client.post.call_count == 2  # Retried once
@@ -927,7 +908,7 @@ class TestHealthCheck:
 
     @pytest.mark.asyncio
     async def test_health_check_success(self, monkeypatch):
-        monkeypatch.setenv("CHATADS_API_KEY", "sk_live_test1234567890abcdef")
+        monkeypatch.setenv("CHATADS_API_KEY", "mock_api_key_test1234567890abcdef")
 
         class DummyClient:
             _circuit_breaker = None
@@ -954,7 +935,7 @@ class TestHealthCheck:
 
     @pytest.mark.asyncio
     async def test_health_check_degraded(self, monkeypatch):
-        monkeypatch.setenv("CHATADS_API_KEY", "sk_live_test1234567890abcdef")
+        monkeypatch.setenv("CHATADS_API_KEY", "mock_api_key_test1234567890abcdef")
 
         class DummyClient:
             _circuit_breaker = None
@@ -981,7 +962,7 @@ class TestHealthCheck:
 
     @pytest.mark.asyncio
     async def test_health_check_circuit_breaker_open(self, monkeypatch):
-        monkeypatch.setenv("CHATADS_API_KEY", "sk_live_test1234567890abcdef")
+        monkeypatch.setenv("CHATADS_API_KEY", "mock_api_key_test1234567890abcdef")
 
         class DummyBreaker:
             def __init__(self, state: str):

@@ -21,6 +21,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - **BREAKING:** Timeout reduced from 15s to 10s for faster failure detection
 - **BREAKING:** Message length limit aligned with backend (5000 → 2000 characters)
+- Renamed `chatads_affiliate_lookup` MCP tool to `chatads_message_send` (old name remains as alias)
+- API key validation no longer enforces any specific prefix; keys are validated server-side
 - HTTP client upgraded from sync to async (`httpx.Client` → `httpx.AsyncClient`)
 - Pre-compiled regex patterns for validation (~1-2ms faster per request)
 - Removed double JSON encoding (~5-10ms faster per request)

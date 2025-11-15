@@ -7,7 +7,7 @@ Claude always receives a predictable shape.
 
 Usage:
     1. Install via PyPI: `pip install chatads-mcp-wrapper`
-    2. Export your API key: `export CHATADS_API_KEY=sk_live_...`
+    2. Export your API key: `export CHATADS_API_KEY=your_chatads_api_key`
     3. Optional overrides:
          - CHATADS_API_BASE_URL (default: https://chatads--chatads-product-fastapiserver-serve.modal.run)
          - CHATADS_API_ENDPOINT (default: /v1/chatads/messages)
@@ -98,7 +98,7 @@ TOOL_VERSION = "0.1.0"
 # Pre-compiled regex patterns for performance
 _COUNTRY_CODE_PATTERN = re.compile(r'^[A-Z]{2}$')
 _LANGUAGE_CODE_PATTERN = re.compile(r'^[a-z]{2}$')
-_API_KEY_PATTERN = re.compile(r"(sk_(?:live|test)_)[A-Za-z0-9]+")
+_API_KEY_REDACTION = "[CHATADS_API_KEY]"
 
 # Global HTTP client cache for connection pooling (keyed by API key)
 # Reusing connections eliminates DNS lookup, TCP handshake, and TLS negotiation overhead
@@ -383,7 +383,7 @@ class ChatAdsClient:
                 last_error = exc
                 LOGGER.warning(
                     "ChatAds transport error: %s (attempt %s/%s)",
-                    _sanitize_error_for_logging(exc),
+                    _sanitize_error_for_logging(exc, self._client.headers.get("x-api-key")),
                     attempt,
                     self.config.max_retries,
                 )
@@ -451,23 +451,23 @@ ERROR_HINTS = {
 }
 
 
-def _sanitize_error_for_logging(error: Exception) -> str:
+def _sanitize_error_for_logging(error: Exception, api_key: Optional[str] = None) -> str:
     """
     Sanitize error messages to prevent leaking sensitive data in logs.
 
     Removes or masks:
-    - API keys (sk_live_*, sk_test_*)
+    - API key values (when provided)
     - Authorization headers
     - Full URLs with potential secrets
     """
     error_str = str(error)
-    # Mask API keys
-    error_str = _API_KEY_PATTERN.sub(r"\1***", error_str)
-    # Mask authorization headers
-    if "x-api-key" in error_str.lower():
-        error_str = "Request error (details redacted for security)"
-    if "authorization" in error_str.lower():
-        error_str = "Request error (details redacted for security)"
+    if api_key:
+        error_str = error_str.replace(api_key, _API_KEY_REDACTION)
+    lowered = error_str.lower()
+    if "x-api-key" in lowered or "authorization" in lowered:
+        return "Request error (details redacted for security)"
+    if "http" in lowered:
+        error_str = re.sub(r"(https?://[^\s?]+)\?[^\s]+", r"\1", error_str)
     return error_str
 
 
@@ -708,16 +708,10 @@ def _validate_inputs(
             status_code=400,
         )
 
-    # API key format validation
-    if not (api_key.startswith("sk_live_") or api_key.startswith("sk_test_")):
+    # API key validation handled server-side; only ensure it's non-empty string.
+    if not api_key or not isinstance(api_key, str):
         raise ChatAdsAPIError(
-            "API key must start with 'sk_live_' or 'sk_test_'.",
-            code="CONFIGURATION_ERROR",
-            status_code=500,
-        )
-    if len(api_key) < 20:
-        raise ChatAdsAPIError(
-            "API key appears invalid (too short).",
+            "API key is missing. Provide CHATADS_API_KEY or pass api_key.",
             code="CONFIGURATION_ERROR",
             status_code=500,
         )
@@ -780,7 +774,7 @@ def _error_envelope_from_exc(
     return envelope.model_dump()
 
 
-async def run_chatads_affiliate_lookup(
+async def run_chatads_message_send(
     message: str,
     ip: Optional[str] = None,
     user_agent: Optional[str] = None,
@@ -789,7 +783,7 @@ async def run_chatads_affiliate_lookup(
     api_key: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
-    Fetch normalized affiliate recommendations from ChatAds (async).
+    Send a message to ChatAds and fetch normalized affiliate recommendations (async).
 
     Args:
         message: User query that needs affiliate suggestions.
@@ -800,6 +794,7 @@ async def run_chatads_affiliate_lookup(
         api_key: Optional API key override; falls back to CHATADS_API_KEY env var.
     """
     client: Optional[ChatAdsClient] = None
+    resolved_api_key: Optional[str] = None
     try:
         resolved_api_key = _resolve_api_key(api_key)
 
@@ -832,7 +827,7 @@ async def run_chatads_affiliate_lookup(
         )
         return normalized.model_dump()
     except ChatAdsAPIError as exc:
-        LOGGER.error("ChatAds tool error (%s): %s", exc.code, _sanitize_error_for_logging(exc))
+        LOGGER.error("ChatAds tool error (%s): %s", exc.code, _sanitize_error_for_logging(exc, resolved_api_key))
         notes = "Raised before contacting ChatAds." if client is None else None
         source_url = (
             f"{client.config.base_url}{client.config.endpoint}"
@@ -845,7 +840,9 @@ async def run_chatads_affiliate_lookup(
             await client.aclose()
 
 
-chatads_affiliate_lookup = mcp.tool()(run_chatads_affiliate_lookup)
+run_chatads_affiliate_lookup = run_chatads_message_send  # Backward compatibility alias
+chatads_message_send = mcp.tool()(run_chatads_message_send)
+chatads_affiliate_lookup = chatads_message_send  # Backward compatibility alias
 
 
 async def run_chatads_health_check(api_key: Optional[str] = None) -> Dict[str, Any]:

@@ -6,7 +6,7 @@ common scenarios. The wrapper provides async/await support for efficient
 concurrent request handling.
 
 Setup:
-    export CHATADS_API_KEY=sk_test_your_key_here
+    export CHATADS_API_KEY=your_chatads_api_key
     python examples/basic_usage.py
 
 Requirements:
@@ -22,7 +22,7 @@ from pathlib import Path
 # Add parent directory to path so we can import the wrapper
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from chatads_mcp_wrapper import chatads_affiliate_lookup, chatads_health_check
+from chatads_mcp_wrapper import chatads_message_send, chatads_health_check
 
 
 async def example_1_basic_lookup():
@@ -31,7 +31,7 @@ async def example_1_basic_lookup():
     print("Example 1: Basic Affiliate Lookup")
     print("=" * 70)
 
-    result = await chatads_affiliate_lookup(
+    result = await chatads_message_send(
         message="best laptop for coding"
     )
 
@@ -69,7 +69,7 @@ async def example_2_with_geo_targeting():
     print("Example 2: Geographic Targeting")
     print("=" * 70)
 
-    result = await chatads_affiliate_lookup(
+    result = await chatads_message_send(
         message="best headphones for music",
         country="US",  # ISO 3166-1 alpha-2 country code
         language="en"  # ISO 639-1 language code
@@ -124,7 +124,7 @@ async def example_4_error_handling():
 
     # Test 1: Invalid input (too short)
     print("\nTest 1: Message too short (< 2 words)")
-    result = await chatads_affiliate_lookup(message="laptop")
+    result = await chatads_message_send(message="laptop")
 
     if result['status'] == 'error':
         print(f"  ❌ Error Code: {result['error_code']}")
@@ -132,7 +132,7 @@ async def example_4_error_handling():
 
     # Test 2: Invalid country code
     print("\nTest 2: Invalid country code")
-    result = await chatads_affiliate_lookup(
+    result = await chatads_message_send(
         message="best laptop for coding",
         country="USA"  # Should be "US" (2-letter code)
     )
@@ -144,7 +144,7 @@ async def example_4_error_handling():
     # Test 3: Message too long
     print("\nTest 3: Message too many words (> 100)")
     long_message = " ".join(["word"] * 101)
-    result = await chatads_affiliate_lookup(message=long_message)
+    result = await chatads_message_send(message=long_message)
 
     if result['status'] == 'error':
         print(f"  ❌ Error Code: {result['error_code']}")
@@ -177,7 +177,7 @@ async def example_5_concurrent_requests():
 
     # Run all queries concurrently (this is where async shines!)
     results = await asyncio.gather(*[
-        chatads_affiliate_lookup(message=query)
+        chatads_message_send(message=query)
         for query in queries
     ])
 
@@ -206,7 +206,7 @@ async def example_6_with_user_context():
     print("Example 6: User Context Parameters")
     print("=" * 70)
 
-    result = await chatads_affiliate_lookup(
+    result = await chatads_message_send(
         message="best running shoes",
         ip="8.8.8.8",  # User's IP (for geo-targeting)
         user_agent="Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)",
@@ -232,7 +232,7 @@ async def example_7_quota_monitoring():
     print("Example 7: Quota Monitoring")
     print("=" * 70)
 
-    result = await chatads_affiliate_lookup(
+    result = await chatads_message_send(
         message="best laptop for students"
     )
 
@@ -284,7 +284,7 @@ async def main():
         print("❌ ERROR: CHATADS_API_KEY environment variable not set")
         print("=" * 70)
         print("\nPlease set your API key:")
-        print("  export CHATADS_API_KEY=sk_live_your_key_here")
+        print("  export CHATADS_API_KEY=your_chatads_api_key")
         print("\nGet your API key from: https://getchatads.com")
         print()
         return

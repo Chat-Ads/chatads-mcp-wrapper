@@ -47,7 +47,7 @@ pip install -r requirements-dev.txt
 Set your API key:
 
 ```bash
-export CHATADS_API_KEY=sk_live_...
+export CHATADS_API_KEY=your_chatads_api_key
 ```
 
 ## Running the MCP Server
@@ -58,8 +58,10 @@ chatads-mcp
 ```
 
 The server provides two MCP tools:
-- `chatads_affiliate_lookup` - Main tool for fetching affiliate recommendations
+- `chatads_message_send` - Main tool for fetching affiliate recommendations
 - `chatads_health_check` - Health check tool for API status verification
+
+> `chatads_affiliate_lookup` is still available as a backwards-compatible alias.
 
 ### Claude Desktop integration
 
@@ -72,11 +74,12 @@ Add a server entry to `claude_desktop_config.json` (path varies per OS):
 ```json
 {
   "mcpServers": {
-    "chatads-affiliate": {
+    "chatads": {
       "command": "chatads-mcp",
       "args": [],
       "env": {
-        "CHATADS_API_KEY": "sk_live_your_key_here"
+        "CHATADS_API_KEY": "your_chatads_api_key",
+        "CHATADS_API_BASE_URL": "https://chatads--chatads-api-fastapiserver-serve.modal.run"
       }
     }
   }
@@ -88,7 +91,7 @@ Restart Claude Desktop and the tool will be available.
 ## Tool Signature
 
 ```text
-chatads_affiliate_lookup(
+chatads_message_send(
     message: str,
     ip?: str,
     user_agent?: str,
@@ -156,6 +159,33 @@ The wrapper automatically checks usage metadata and warns when approaching limit
 - Monthly quota < 10 requests remaining
 - Daily quota ≥ 90% used (configurable via `CHATADS_QUOTA_WARNING_THRESHOLD`)
 - Minute quota near limit
+
+## Development
+
+### Install Dev Dependencies
+
+```bash
+python3 -m pip install -r requirements-dev.txt
+```
+
+This installs the full test stack (pytest, pytest-asyncio, pytest-cov, etc.).
+
+### Run Tests with Coverage
+
+```bash
+pytest
+```
+
+Tests are async and the default pytest configuration enforces ≥85% coverage.  
+If you need to run a focused subset (e.g., only the message-send tests) without failing the coverage gate:
+
+```bash
+PYTEST_ADDOPTS="" pytest -k message_send
+# or equivalently
+pytest -k message_send --no-cov
+```
+
+Remember to run the full suite before committing so coverage stays above the required threshold.
 
 Warnings appear in `metadata.notes` and logs. No client-side state management needed - uses real-time data from backend.
 

@@ -6,7 +6,7 @@ This script directly calls the async functions to verify they work.
 Unlike running the MCP server, this gives you immediate feedback.
 
 Usage:
-    export CHATADS_API_KEY=sk_test_your_key
+    export CHATADS_API_KEY=your_chatads_api_key
     python3 test_live.py
 """
 
@@ -14,7 +14,7 @@ import asyncio
 import os
 import sys
 
-from chatads_mcp_wrapper import run_chatads_affiliate_lookup, run_chatads_health_check
+from chatads_mcp_wrapper import run_chatads_message_send, run_chatads_health_check
 
 
 async def test_health_check():
@@ -43,7 +43,7 @@ async def test_basic_lookup():
     print("🔍 Test 2: Basic Affiliate Lookup")
     print("-" * 50)
 
-    result = await run_chatads_affiliate_lookup(
+    result = await run_chatads_message_send(
         message="best laptop for coding"
     )
 
@@ -91,7 +91,7 @@ async def test_concurrent():
     start = time.perf_counter()
 
     results = await asyncio.gather(*[
-        run_chatads_affiliate_lookup(message=q)
+        run_chatads_message_send(message=q)
         for q in queries
     ])
 
@@ -115,7 +115,7 @@ async def test_error_handling():
     print("-" * 50)
 
     # Test with invalid input (too short)
-    result = await run_chatads_affiliate_lookup(message="x")
+    result = await run_chatads_message_send(message="x")
 
     if result['status'] == 'error':
         print(f"✅ Correctly caught validation error:")
@@ -139,13 +139,12 @@ async def main():
     if not os.getenv("CHATADS_API_KEY"):
         print("❌ ERROR: CHATADS_API_KEY not set")
         print("\nSet your API key:")
-        print("  export CHATADS_API_KEY=sk_test_your_key")
+        print("  export CHATADS_API_KEY=your_chatads_api_key")
         print()
         sys.exit(1)
 
     api_key = os.getenv("CHATADS_API_KEY")
-    key_type = "🧪 TEST" if api_key.startswith("sk_test_") else "🔴 LIVE"
-    print(f"{key_type} API Key: {api_key[:15]}...")
+    print(f"Using API Key: {api_key[:15]}...")
     print()
 
     try:

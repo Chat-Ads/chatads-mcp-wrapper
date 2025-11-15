@@ -25,7 +25,7 @@ Thank you for your interest in contributing to ChatAds MCP Wrapper! We welcome c
 
 4. **Set up your API key:**
    ```bash
-   export CHATADS_API_KEY=sk_test_your_test_key_here
+   export CHATADS_API_KEY=your_chatads_api_key
    ```
 
 ## Development Workflow
@@ -229,7 +229,7 @@ When reporting bugs, please include:
    - Operating system
    - Package versions (`pip list`)
 4. **Error messages:** Full error output with stack traces
-5. **API key redacted:** Replace API keys with `sk_live_***` or `sk_test_***`
+5. **API key redacted:** Replace API keys with `[CHATADS_API_KEY]`
 
 **Example bug report:**
 ```markdown

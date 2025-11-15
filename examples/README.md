@@ -6,7 +6,7 @@ This directory contains example code demonstrating how to use the ChatAds MCP Wr
 
 1. **Set your API key:**
    ```bash
-   export CHATADS_API_KEY=sk_test_your_key_here
+   export CHATADS_API_KEY=your_chatads_api_key
    ```
 
 2. **Run the examples:**
@@ -110,14 +110,14 @@ The async/await pattern allows you to process multiple queries efficiently:
 
 ```python
 # Sequential (slow)
-result1 = await chatads_affiliate_lookup("query 1")
-result2 = await chatads_affiliate_lookup("query 2")
+result1 = await chatads_message_send("query 1")
+result2 = await chatads_message_send("query 2")
 # Total: ~260ms
 
 # Concurrent (fast!)
 results = await asyncio.gather(
-    chatads_affiliate_lookup("query 1"),
-    chatads_affiliate_lookup("query 2"),
+    chatads_message_send("query 1"),
+    chatads_message_send("query 2"),
 )
 # Total: ~130ms
 ```
@@ -127,7 +127,7 @@ results = await asyncio.gather(
 Always check the `status` field:
 
 ```python
-result = await chatads_affiliate_lookup(message="...")
+result = await chatads_message_send(message="...")
 
 if result['status'] == 'success':
     # Use the affiliate link

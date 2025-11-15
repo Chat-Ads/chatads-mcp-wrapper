@@ -48,11 +48,10 @@ When using ChatAds MCP Wrapper:
 
 **DO:**
 - ✅ Store API keys in environment variables
-- ✅ Use different keys for development and production
+- ✅ Use different keys for development vs. production
 - ✅ Rotate keys regularly (every 90 days)
 - ✅ Revoke compromised keys immediately
-- ✅ Use `sk_test_*` keys for development
-- ✅ Use `sk_live_*` keys only in production
+- ✅ Treat ChatAds API keys like secrets—never share or log them
 
 **DON'T:**
 - ❌ Commit API keys to version control
