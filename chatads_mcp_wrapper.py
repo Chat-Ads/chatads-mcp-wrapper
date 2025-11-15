@@ -292,6 +292,7 @@ class ChatAdsClient:
 
         # Check cache for existing client (connection pooling)
         cache_key = f"{api_key}:{self.config.base_url}"
+        self._cache_key = cache_key
         with _http_client_cache_lock:
             if cache_key in _http_client_cache:
                 self._client = _http_client_cache[cache_key]
@@ -345,6 +346,11 @@ class ChatAdsClient:
         # Shared clients persist for connection reuse across requests
         if getattr(self, '_owns_client', False):
             await self._client.aclose()
+            if self._cache_key:
+                with _http_client_cache_lock:
+                    cached = _http_client_cache.get(self._cache_key)
+                    if cached is self._client:
+                        _http_client_cache.pop(self._cache_key, None)
 
     def close(self) -> None:
         """Sync close - for compatibility, but prefer aclose()."""
@@ -352,6 +358,11 @@ class ChatAdsClient:
         # Shared clients persist for connection reuse across requests
         if getattr(self, '_owns_client', False):
             self._client.close()  # Sync close, won't await cleanup
+            if self._cache_key:
+                with _http_client_cache_lock:
+                    cached = _http_client_cache.get(self._cache_key)
+                    if cached is self._client:
+                        _http_client_cache.pop(self._cache_key, None)
 
     async def fetch(self, payload: Dict[str, Any]) -> tuple[Dict[str, Any], int, float]:
         """Async POST payload to ChatAds with retry/backoff and return (json, status, latency_ms)."""
