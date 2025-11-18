@@ -14,29 +14,7 @@ import asyncio
 import os
 import sys
 
-from chatads_mcp_wrapper import run_chatads_message_send, run_chatads_health_check
-
-
-async def test_health_check():
-    """Test 1: Health check (doesn't consume quota)."""
-    print("🏥 Test 1: Health Check")
-    print("-" * 50)
-
-    result = await run_chatads_health_check()
-
-    status_emoji = {"healthy": "✅", "degraded": "⚠️", "unhealthy": "❌"}
-    print(f"{status_emoji.get(result['status'], '❓')} Status: {result['status']}")
-    print(f"   API Reachable: {result['api_reachable']}")
-    print(f"   Circuit Breaker: {result['circuit_breaker_state']}")
-    print(f"   Latency: {result.get('latency_ms', 0):.2f}ms")
-
-    if result.get('error_code'):
-        print(f"   ⚠️ Error: {result['error_code']} - {result['error_message']}")
-        return False
-
-    print()
-    return True
-
+from chatads_mcp_wrapper import run_chatads_message_send
 
 async def test_basic_lookup():
     """Test 2: Basic affiliate lookup."""
@@ -150,7 +128,6 @@ async def main():
     try:
         # Run tests
         success = True
-        success = await test_health_check() and success
         success = await test_basic_lookup() and success
         success = await test_concurrent() and success
         success = await test_error_handling() and success

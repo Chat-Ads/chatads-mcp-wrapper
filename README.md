@@ -59,9 +59,6 @@ chatads-mcp
 
 The server provides two MCP tools:
 - `chatads_message_send` - Main tool for fetching affiliate recommendations
-- `chatads_health_check` - Health check tool for API status verification
-
-> `chatads_affiliate_lookup` is still available as a backwards-compatible alias.
 
 ### Claude Desktop integration
 
@@ -139,20 +136,6 @@ export CHATADS_CIRCUIT_BREAKER_THRESHOLD=5
 export CHATADS_CIRCUIT_BREAKER_TIMEOUT=60
 ```
 
-### Health Check Tool
-
-Use `chatads_health_check()` to verify API connectivity without consuming quota:
-
-```python
-result = chatads_health_check()
-# Returns: status (healthy/degraded/unhealthy), latency, circuit breaker state
-```
-
-Useful for:
-- Deployment verification
-- Monitoring dashboards
-- Pre-flight checks
-
 ### Quota Warnings
 
 The wrapper automatically checks usage metadata and warns when approaching limits:
@@ -209,7 +192,6 @@ Emitted metrics:
 
 - **Validate prompts**: ensure `message` is non-empty and under 100 words to avoid upstream validation errors.
 - **Monitor quota warnings**: Check `metadata.notes` for quota warnings to avoid hitting limits.
-- **Use health checks**: Verify API availability before critical operations.
 - **Honor circuit breaker**: When circuit is open, wait for cooldown period before retrying.
 - **Log metadata**: persist `metadata.request_id` and `metadata.usage_summary` for debugging and analytics.
 - **Handle `no_match`**: treat `status="no_match"` as a graceful fallback—use `reason` to explain why no ad was returned.
@@ -223,7 +205,7 @@ Emitted metrics:
 | `CONFIGURATION_ERROR` | Missing `CHATADS_API_KEY` | Export the key or pass `api_key` argument. |
 | `FORBIDDEN` / `UNAUTHORIZED` | Invalid or revoked key | Verify the key in Supabase / dashboard; rotate if needed. |
 | `MINUTE_QUOTA_EXCEEDED` / `DAILY_QUOTA_EXCEEDED` / `QUOTA_EXCEEDED` | Hitting rate or hard caps | Respect `metadata.notes` and retry after the implied window or upgrade the plan. |
-| `CIRCUIT_BREAKER_OPEN` | Too many consecutive failures | Circuit breaker is protecting against failed requests. Wait 60 seconds or check API health with `chatads_health_check()`. |
+| `CIRCUIT_BREAKER_OPEN` | Too many consecutive failures | Circuit breaker is protecting against failed requests. Wait 60 seconds. |
 | `UPSTREAM_UNAVAILABLE` | Network outage or repeated 5xx | Wait/backoff; confirm Modal deployment health; consider raising `CHATADS_MCP_MAX_RETRIES`. |
 | `INVALID_INPUT` | Empty message or <2 words | Provide more descriptive user text; sanitize before sending. |
 | `REQUEST_TOO_LARGE` | Payload exceeds size limit | Reduce message length or increase `CHATADS_MAX_REQUEST_SIZE`. |

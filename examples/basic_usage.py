@@ -22,7 +22,7 @@ from pathlib import Path
 # Add parent directory to path so we can import the wrapper
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from chatads_mcp_wrapper import chatads_message_send, chatads_health_check
+from chatads_mcp_wrapper import chatads_message_send
 
 
 async def example_1_basic_lookup():
@@ -87,34 +87,6 @@ async def example_2_with_geo_targeting():
     print(f"  Country: {result['metadata'].get('country', 'N/A')}")
     print(f"  Language: {result['metadata'].get('language', 'N/A')}")
     print()
-
-
-async def example_3_health_check():
-    """Example 3: Check API health and connectivity."""
-    print("=" * 70)
-    print("Example 3: Health Check")
-    print("=" * 70)
-
-    result = await chatads_health_check()
-
-    status_emoji = {
-        "healthy": "✅",
-        "degraded": "⚠️",
-        "unhealthy": "❌"
-    }
-
-    print(f"\n{status_emoji.get(result['status'], '❓')} API Status: {result['status']}")
-    print(f"  API Reachable: {result['api_reachable']}")
-    print(f"  Circuit Breaker: {result['circuit_breaker_state']}")
-    print(f"  Latency: {result.get('latency_ms', 0):.2f}ms")
-    print(f"  Endpoint: {result['endpoint']}")
-
-    if result.get('error_code'):
-        print(f"\n⚠️ Error: {result['error_code']}")
-        print(f"  Message: {result['error_message']}")
-
-    print()
-
 
 async def example_4_error_handling():
     """Example 4: Handling validation errors and API errors."""
@@ -298,7 +270,6 @@ async def main():
     try:
         await example_1_basic_lookup()
         await example_2_with_geo_targeting()
-        await example_3_health_check()
         await example_4_error_handling()
         await example_5_concurrent_requests()
         await example_6_with_user_context()

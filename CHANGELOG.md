@@ -45,7 +45,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Initial release of ChatAds MCP Wrapper
 - Two MCP tools:
   - `chatads_affiliate_lookup` - Main tool for fetching affiliate recommendations
-  - `chatads_health_check` - Health check tool for API status verification
 - Circuit breaker pattern to prevent retry storms
   - Configurable failure threshold (default: 5)
   - Configurable timeout (default: 60 seconds)
