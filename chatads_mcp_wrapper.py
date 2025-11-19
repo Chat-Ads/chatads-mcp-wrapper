@@ -856,8 +856,33 @@ chatads_message_send = mcp.tool()(run_chatads_message_send)
 chatads_affiliate_lookup = chatads_message_send  # Backward compatibility alias
 
 def main() -> None:
-    LOGGER.info("Starting ChatAds MCP wrapper (version %s)", TOOL_VERSION)
-    mcp.run()
+    """Main entry point with support for multiple transport modes."""
+    import sys
+
+    # Check for transport mode argument
+    if "--sse" in sys.argv or "--http" in sys.argv:
+        # SSE mode for OpenAI Apps SDK (remote deployment)
+        LOGGER.info("Starting ChatAds MCP wrapper in SSE mode (version %s)", TOOL_VERSION)
+        # Note: SSE mode is handled by the FastAPI app in chatads-code/api/mcp_server.py
+        # This is just a placeholder for future standalone SSE server support
+        print("SSE mode is handled by the FastAPI deployment.")
+        print("Deploy to Modal using: modal deploy chatads_api.py")
+        print("MCP endpoints will be available at:")
+        print("  - SSE: https://your-app.modal.run/mcp/sse")
+        print("  - Messages: https://your-app.modal.run/mcp/messages")
+        sys.exit(0)
+    elif "--stdio" in sys.argv or len(sys.argv) == 1:
+        # stdio mode for Claude Desktop (local)
+        LOGGER.info("Starting ChatAds MCP wrapper in stdio mode (version %s)", TOOL_VERSION)
+        mcp.run(transport="stdio")
+    else:
+        print("ChatAds MCP Wrapper")
+        print("Usage:")
+        print("  chatads-mcp [--stdio]  # Run with stdio transport (Claude Desktop)")
+        print("  chatads-mcp --sse      # Show SSE deployment info (OpenAI Apps)")
+        print("")
+        print("Default: stdio mode")
+        sys.exit(1)
 
 
 if __name__ == "__main__":
