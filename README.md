@@ -57,7 +57,7 @@ chatads-mcp
 # or: python -m chatads_mcp_wrapper
 ```
 
-The server provides two MCP tools:
+The server provides one MCP tool:
 - `chatads_message_send` - Main tool for fetching affiliate recommendations
 
 ### Claude Desktop integration

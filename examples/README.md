@@ -29,24 +29,20 @@ Comprehensive examples covering all major use cases:
 - Using country and language parameters
 - Region-specific recommendations
 
-**Example 3: Health Check**
-- Verifying API connectivity
-- Checking circuit breaker status
-
-**Example 4: Error Handling**
+**Example 3: Error Handling**
 - Common validation errors
 - How to handle API errors gracefully
 
-**Example 5: Concurrent Requests** 🚀
+**Example 4: Concurrent Requests** 🚀
 - Using async/await for performance
 - Processing multiple queries simultaneously
 - Performance benchmarking
 
-**Example 6: User Context**
+**Example 5: User Context**
 - Passing IP address and user agent
 - Better targeting with user data
 
-**Example 7: Quota Monitoring**
+**Example 6: Quota Monitoring**
 - Tracking API usage
 - Avoiding quota limits
 
@@ -81,7 +77,7 @@ Matched: True
   Minute: 1/5
 
 ======================================================================
-Example 5: Concurrent Requests (Async Performance)
+Example 4: Concurrent Requests (Async Performance)
 ======================================================================
 
 🚀 Running 8 queries concurrently...

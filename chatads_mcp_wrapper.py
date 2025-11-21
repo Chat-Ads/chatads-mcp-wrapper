@@ -9,7 +9,7 @@ Usage:
     1. Install via PyPI: `pip install chatads-mcp-wrapper`
     2. Export your API key: `export CHATADS_API_KEY=your_chatads_api_key`
     3. Optional overrides:
-         - CHATADS_API_BASE_URL (default: https://chatads--chatads-product-fastapiserver-serve.modal.run)
+         - CHATADS_API_BASE_URL (default: https://chatads--chatads-api-fastapiserver-serve.modal.run)
          - CHATADS_API_ENDPOINT (default: /v1/chatads/messages)
          - CHATADS_MCP_MAX_RETRIES (default: 3)
          - CHATADS_MCP_TIMEOUT (seconds, default: 15)
@@ -83,7 +83,7 @@ if not LOGGER.handlers:
 # Defaults can be overridden with env vars noted in the module docstring.
 DEFAULT_BASE_URL = os.getenv(
     "CHATADS_API_BASE_URL",
-    "https://chatads--chatads-product-fastapiserver-serve.modal.run",
+    "https://chatads--chatads-api-fastapiserver-serve.modal.run",
 )
 DEFAULT_ENDPOINT = os.getenv("CHATADS_API_ENDPOINT", "/v1/chatads/messages")
 DEFAULT_TIMEOUT = float(os.getenv("CHATADS_MCP_TIMEOUT", "10"))  # Reduced from 15s to allow faster retries

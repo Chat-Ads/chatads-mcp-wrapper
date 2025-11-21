@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.4] - 2025-01-20
+
+### Fixed
+- **CRITICAL:** Corrected default API base URL from `chatads-product-fastapiserver` to `chatads-api-fastapiserver` (fixes 404 errors)
+- Removed unused health check tool that was no longer supported by the backend
+
 ### Added
 - Async/await support for concurrent request handling (10-30x throughput improvement)
 - Connection pooling with 100 max connections and 20 keep-alive connections
@@ -27,11 +33,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Pre-compiled regex patterns for validation (~1-2ms faster per request)
 - Removed double JSON encoding (~5-10ms faster per request)
 - Connection cache now properly bounded (max 10 clients to prevent memory leaks)
-
-### Fixed
-- Memory leak in HTTP client cache (now bounded with LRU eviction)
-- Async cleanup properly uses `aclose()` instead of `close()`
-- Connection pooling now works correctly with async operations
+- Updated README to reflect single tool (removed reference to health check)
 
 ### Performance
 - **Cold requests:** ~280ms (unchanged)
