@@ -27,7 +27,6 @@ Usage:
 from __future__ import annotations
 
 import asyncio
-import ipaddress
 import json
 import logging
 import os
@@ -96,9 +95,54 @@ QUOTA_WARNING_THRESHOLD = float(os.getenv("CHATADS_QUOTA_WARNING_THRESHOLD", "0.
 TOOL_VERSION = "0.1.0"
 
 # Pre-compiled regex patterns for performance
-_COUNTRY_CODE_PATTERN = re.compile(r'^[A-Z]{2}$')
-_LANGUAGE_CODE_PATTERN = re.compile(r'^[a-z]{2}$')
 _API_KEY_REDACTION = "[CHATADS_API_KEY]"
+
+# FunctionItem field handling mirrors the SDKs
+_FUNCTION_ITEM_OPTIONAL_FIELDS = frozenset(
+    {
+        "page_url",
+        "page_title",
+        "referrer",
+        "address",
+        "email",
+        "type",
+        "domain",
+        "ip",
+        "reason",
+        "company",
+        "name",
+        "country",
+        "override_parsing",
+        "response_quality",
+    }
+)
+_FIELD_TO_PAYLOAD_KEY = {
+    "page_url": "pageUrl",
+    "page_title": "pageTitle",
+    "referrer": "referrer",
+    "address": "address",
+    "email": "email",
+    "type": "type",
+    "domain": "domain",
+    "ip": "ip",
+    "reason": "reason",
+    "company": "company",
+    "name": "name",
+    "country": "country",
+    "override_parsing": "override_parsing",
+    "response_quality": "response_quality",
+}
+_FIELD_ALIAS_LOOKUP = {
+    "pageurl": "page_url",
+    "pagetitle": "page_title",
+    "page_title": "page_title",
+    "page_url": "page_url",
+    "overrideparsing": "override_parsing",
+    "override_parsing": "override_parsing",
+    "responsequality": "response_quality",
+    "response_quality": "response_quality",
+}
+RESERVED_PAYLOAD_KEYS = frozenset({"message", *(_FIELD_TO_PAYLOAD_KEY.values())})
 
 # Global HTTP client cache for connection pooling (keyed by API key)
 # Reusing connections eliminates DNS lookup, TCP handshake, and TLS negotiation overhead
@@ -654,9 +698,6 @@ def normalize_envelope(
 
 def _validate_inputs(
     message: str,
-    ip: Optional[str],
-    country: Optional[str],
-    language: Optional[str],
     api_key: str,
 ) -> None:
     """
@@ -664,57 +705,9 @@ def _validate_inputs(
 
     Raises ChatAdsAPIError for invalid inputs to fail fast and avoid wasted API calls.
     """
-    # Message validation
-    if not message or not message.strip():
+    if not message or not isinstance(message, str) or not message.strip():
         raise ChatAdsAPIError(
             "Message cannot be empty.",
-            code="INVALID_INPUT",
-            status_code=400,
-        )
-
-    words = message.split()
-    if len(words) < 2:
-        raise ChatAdsAPIError(
-            "Message must contain at least 2 words.",
-            code="MESSAGE_TOO_SHORT",
-            status_code=400,
-        )
-    if len(words) > 100:
-        raise ChatAdsAPIError(
-            "Message exceeds 100 word limit.",
-            code="MESSAGE_TOO_MANY_WORDS",
-            status_code=400,
-        )
-    if len(message) > 2000:
-        raise ChatAdsAPIError(
-            "Message exceeds 2000 character limit.",
-            code="MESSAGE_TOO_LONG",
-            status_code=400,
-        )
-
-    # IP validation
-    if ip:
-        try:
-            ipaddress.ip_address(ip)
-        except ValueError as exc:
-            raise ChatAdsAPIError(
-                f"Invalid IP address format: {ip}",
-                code="INVALID_INPUT",
-                status_code=400,
-            ) from exc
-
-    # Country validation (ISO 3166-1 alpha-2: exactly 2 uppercase letters)
-    if country and not _COUNTRY_CODE_PATTERN.match(country):
-        raise ChatAdsAPIError(
-            f"Country must be a 2-letter ISO 3166-1 code (e.g., 'US', 'GB'). Got: {country}",
-            code="INVALID_INPUT",
-            status_code=400,
-        )
-
-    # Language validation (ISO 639-1: exactly 2 lowercase letters)
-    if language and not _LANGUAGE_CODE_PATTERN.match(language):
-        raise ChatAdsAPIError(
-            f"Language must be a 2-letter ISO 639-1 code (e.g., 'en', 'es'). Got: {language}",
             code="INVALID_INPUT",
             status_code=400,
         )
@@ -729,21 +722,62 @@ def _validate_inputs(
 
 
 def _build_request_payload(kwargs: Dict[str, Any]) -> Dict[str, Any]:
-    payload = {
-        "message": kwargs["message"],
-        "ip": kwargs.get("ip"),
-        "userAgent": kwargs.get("user_agent"),
-        "country": kwargs.get("country"),
-        "language": kwargs.get("language"),
-    }
-    # Remove None values so we only send what the API expects.
-    cleaned = {key: value for key, value in payload.items() if value is not None}
+    message = kwargs.get("message")
+    if not isinstance(message, str) or not message.strip():
+        raise ChatAdsAPIError(
+            "Message cannot be empty.",
+            code="INVALID_INPUT",
+            status_code=400,
+        )
 
-    # Note: Size validation removed to avoid double JSON encoding overhead.
-    # Backend already validates request size (10MB max request, 1MB max JSON).
-    # Message length is pre-validated (max 2000 chars), so payload will be small.
+    # Separate known FunctionItem fields from extras, applying aliases.
+    known_fields: Dict[str, Any] = {}
+    extra_fields: Dict[str, Any] = {}
+    provided_extra_fields = kwargs.get("extra_fields") or {}
+    if provided_extra_fields and not isinstance(provided_extra_fields, dict):
+        raise ChatAdsAPIError(
+            "extra_fields must be a JSON object (dict).",
+            code="INVALID_INPUT",
+            status_code=400,
+        )
 
-    return cleaned
+    def _normalize_field_name(raw: str) -> Optional[str]:
+        lowered = raw.lower()
+        if lowered in _FUNCTION_ITEM_OPTIONAL_FIELDS:
+            return lowered
+        return _FIELD_ALIAS_LOOKUP.get(lowered)
+
+    for key, value in kwargs.items():
+        if key in {"message", "extra_fields"}:
+            continue
+        if value is None:
+            continue
+        normalized = _normalize_field_name(key)
+        if normalized:
+            known_fields[normalized] = value
+        else:
+            extra_fields[key] = value
+
+    for key, value in provided_extra_fields.items():
+        if value is None:
+            continue
+        extra_fields[key] = value
+
+    payload: Dict[str, Any] = {"message": message.strip()}
+    for field_name, value in known_fields.items():
+        payload_key = _FIELD_TO_PAYLOAD_KEY[field_name]
+        payload[payload_key] = value
+
+    conflicts = RESERVED_PAYLOAD_KEYS.intersection(extra_fields.keys())
+    if conflicts:
+        conflict_list = ", ".join(sorted(conflicts))
+        raise ChatAdsAPIError(
+            f"extra_fields contains reserved keys that would override core payload data: {conflict_list}",
+            code="INVALID_INPUT",
+            status_code=400,
+        )
+    payload.update(extra_fields)
+    return payload
 
 
 def _resolve_api_key(user_supplied: Optional[str]) -> str:
@@ -787,10 +821,21 @@ def _error_envelope_from_exc(
 
 async def run_chatads_message_send(
     message: str,
+    page_url: Optional[str] = None,
+    page_title: Optional[str] = None,
+    referrer: Optional[str] = None,
+    address: Optional[str] = None,
+    email: Optional[str] = None,
+    type: Optional[str] = None,
+    domain: Optional[str] = None,
     ip: Optional[str] = None,
-    user_agent: Optional[str] = None,
+    reason: Optional[str] = None,
+    company: Optional[str] = None,
+    name: Optional[str] = None,
     country: Optional[str] = None,
-    language: Optional[str] = None,
+    override_parsing: Optional[bool] = None,
+    response_quality: Optional[str] = None,
+    extra_fields: Optional[Dict[str, Any]] = None,
     api_key: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
@@ -812,19 +857,27 @@ async def run_chatads_message_send(
         # Validate inputs before making any API calls (fail fast)
         _validate_inputs(
             message=message.strip(),
-            ip=ip,
-            country=country,
-            language=language,
             api_key=resolved_api_key,
         )
 
         payload = _build_request_payload(
             {
                 "message": message.strip(),
+                "page_url": page_url,
+                "page_title": page_title,
+                "referrer": referrer,
+                "address": address,
+                "email": email,
+                "type": type,
+                "domain": domain,
                 "ip": ip,
-                "user_agent": user_agent,
+                "reason": reason,
+                "company": company,
+                "name": name,
                 "country": country,
-                "language": language,
+                "override_parsing": override_parsing,
+                "response_quality": response_quality,
+                "extra_fields": extra_fields,
             }
         )
 
