@@ -114,6 +114,10 @@ _FUNCTION_ITEM_OPTIONAL_FIELDS = frozenset(
         "country",
         "override_parsing",
         "response_quality",
+        "message_analysis",
+        "fill_priority",
+        "min_intent",
+        "skip_message_analysis",
     }
 )
 _FIELD_TO_PAYLOAD_KEY = {
@@ -131,6 +135,10 @@ _FIELD_TO_PAYLOAD_KEY = {
     "country": "country",
     "override_parsing": "override_parsing",
     "response_quality": "response_quality",
+    "message_analysis": "message_analysis",
+    "fill_priority": "fill_priority",
+    "min_intent": "min_intent",
+    "skip_message_analysis": "skip_message_analysis",
 }
 _FIELD_ALIAS_LOOKUP = {
     "pageurl": "page_url",
@@ -141,6 +149,14 @@ _FIELD_ALIAS_LOOKUP = {
     "override_parsing": "override_parsing",
     "responsequality": "response_quality",
     "response_quality": "response_quality",
+    "messageanalysis": "message_analysis",
+    "message_analysis": "message_analysis",
+    "fillpriority": "fill_priority",
+    "fill_priority": "fill_priority",
+    "minintent": "min_intent",
+    "min_intent": "min_intent",
+    "skipmessageanalysis": "skip_message_analysis",
+    "skip_message_analysis": "skip_message_analysis",
 }
 RESERVED_PAYLOAD_KEYS = frozenset({"message", *(_FIELD_TO_PAYLOAD_KEY.values())})
 
@@ -544,6 +560,11 @@ def _normalize_reason(raw_reason: Optional[str]) -> Optional[str]:
 
 
 def _summarize_usage(raw_usage: Any) -> Optional[Dict[str, Any]]:
+    """Summarize usage info from API response.
+
+    Note: Per CHA-326, minute-level rate limits were removed from the API.
+    Only daily and monthly limits are tracked now.
+    """
     if not isinstance(raw_usage, dict):
         return None
     summary = {
@@ -556,12 +577,7 @@ def _summarize_usage(raw_usage: Any) -> Optional[Dict[str, Any]]:
             "used": raw_usage.get("daily_requests"),
             "limit": raw_usage.get("daily_limit"),
         },
-        "minute": {
-            "used": raw_usage.get("minute_requests"),
-            "limit": raw_usage.get("minute_limit"),
-        },
         "is_free_tier": raw_usage.get("is_free_tier"),
-        "has_credit_card": raw_usage.get("has_credit_card"),
     }
     return summary
 
@@ -572,6 +588,9 @@ def _check_quota_warnings(usage_summary: Optional[Dict[str, Any]]) -> Optional[s
 
     Returns warning string if user is close to quota limits, None otherwise.
     Uses real-time data from backend, so no client-side state management needed.
+
+    Note: Per CHA-326, minute-level rate limits were removed from the API.
+    Only daily and monthly limits are checked now.
     """
     if not usage_summary:
         return None
@@ -591,12 +610,6 @@ def _check_quota_warnings(usage_summary: Optional[Dict[str, Any]]) -> Optional[s
             warnings.append(
                 f"⚠️  Daily quota at {int(daily_pct * 100)}% ({daily['used']}/{daily['limit']} requests)"
             )
-
-    # Check minute quota
-    minute = usage_summary.get("minute", {})
-    if minute.get("used") and minute.get("limit"):
-        if minute["used"] >= minute["limit"] - 1:
-            warnings.append(f"⚠️  Approaching minute limit ({minute['used']}/{minute['limit']} requests)")
 
     if warnings:
         return " | ".join(warnings)
@@ -623,8 +636,7 @@ def _build_metadata(
     if not notes and usage_summary:
         notes = (
             f"Usage — monthly {usage_summary['monthly']['used']}/{usage_summary['monthly']['limit']}, "
-            f"daily {usage_summary['daily']['used']}/{usage_summary['daily']['limit']}, "
-            f"minute {usage_summary['minute']['used']}/{usage_summary['minute']['limit']}."
+            f"daily {usage_summary['daily']['used']}/{usage_summary['daily']['limit']}."
         )
 
     # Add quota warnings if approaching limits
@@ -835,6 +847,10 @@ async def run_chatads_message_send(
     country: Optional[str] = None,
     override_parsing: Optional[bool] = None,
     response_quality: Optional[str] = None,
+    message_analysis: Optional[str] = None,
+    fill_priority: Optional[str] = None,
+    min_intent: Optional[str] = None,
+    skip_message_analysis: Optional[bool] = None,
     extra_fields: Optional[Dict[str, Any]] = None,
     api_key: Optional[str] = None,
 ) -> Dict[str, Any]:
@@ -844,9 +860,13 @@ async def run_chatads_message_send(
     Args:
         message: User query that needs affiliate suggestions.
         ip: Optional IP used for geo filters (ex. "8.8.8.8").
-        user_agent: Optional user agent for device heuristics.
         country: Optional ISO 3166-1 alpha-2 country code (e.g., 'US', 'GB').
-        language: Optional ISO 639-1 language code (e.g., 'en', 'es').
+        page_url: Optional page URL for context.
+        domain: Optional domain for context.
+        message_analysis: Extraction method - 'fast' (NLP), 'balanced' (default), 'thorough' (LLM+NLP).
+        fill_priority: URL resolution - 'speed' (skip fallbacks), 'coverage' (default, full chain).
+        min_intent: Minimum purchase intent - 'any', 'low' (default), 'medium', 'high'.
+        skip_message_analysis: Skip NLP/LLM extraction and use message directly as search query.
         api_key: Optional API key override; falls back to CHATADS_API_KEY env var.
     """
     client: Optional[ChatAdsClient] = None
@@ -877,6 +897,10 @@ async def run_chatads_message_send(
                 "country": country,
                 "override_parsing": override_parsing,
                 "response_quality": response_quality,
+                "message_analysis": message_analysis,
+                "fill_priority": fill_priority,
+                "min_intent": min_intent,
+                "skip_message_analysis": skip_message_analysis,
                 "extra_fields": extra_fields,
             }
         )

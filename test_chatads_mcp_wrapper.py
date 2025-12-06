@@ -68,15 +68,17 @@ class TestSanitization:
 
 
 class TestInputValidation:
-    """Test input validation for fast failure."""
+    """Test input validation for fast failure.
+
+    Note: Client-side validation is minimal. The MCP wrapper only validates
+    that message and api_key are non-empty. Other validation (IP, country, etc.)
+    is done server-side by the ChatAds API.
+    """
 
     def test_valid_inputs(self):
         # Should not raise
         _validate_inputs(
             message="best laptop for coding",
-            ip="8.8.8.8",
-            country="US",
-            language="en",
             api_key="mock_api_key_1234567890abcdefghij",
         )
 
@@ -84,140 +86,37 @@ class TestInputValidation:
         # Minimal valid inputs (only required params)
         _validate_inputs(
             message="test message",
-            ip=None,
-            country=None,
-            language=None,
             api_key="mock_api_key_1234567890abcdefghij",
         )
 
     # Message validation tests
     def test_empty_message(self):
         with pytest.raises(ChatAdsAPIError) as exc_info:
-            _validate_inputs("", None, None, None, "mock_api_key_1234567890abcdefghij")
+            _validate_inputs("", "mock_api_key_1234567890abcdefghij")
         assert exc_info.value.code == "INVALID_INPUT"
         assert "empty" in str(exc_info.value).lower()
 
     def test_whitespace_only_message(self):
         with pytest.raises(ChatAdsAPIError) as exc_info:
-            _validate_inputs("   ", None, None, None, "mock_api_key_1234567890abcdefghij")
+            _validate_inputs("   ", "mock_api_key_1234567890abcdefghij")
         assert exc_info.value.code == "INVALID_INPUT"
 
-    def test_message_too_short_one_word(self):
-        with pytest.raises(ChatAdsAPIError) as exc_info:
-            _validate_inputs("laptop", None, None, None, "mock_api_key_1234567890abcdefghij")
-        assert exc_info.value.code == "MESSAGE_TOO_SHORT"
-        assert "2 words" in str(exc_info.value)
-
-    def test_message_exactly_two_words(self):
-        # Should pass
-        _validate_inputs("laptop recommendations", None, None, None, "mock_api_key_1234567890abcdefghij")
-
-    def test_message_too_many_words(self):
-        message = " ".join(["word"] * 101)
-        with pytest.raises(ChatAdsAPIError) as exc_info:
-            _validate_inputs(message, None, None, None, "mock_api_key_1234567890abcdefghij")
-        assert exc_info.value.code == "MESSAGE_TOO_MANY_WORDS"
-        assert "100 word" in str(exc_info.value)
-
-    def test_message_exactly_100_words(self):
-        # Should pass
-        message = " ".join(["word"] * 100)
-        _validate_inputs(message, None, None, None, "mock_api_key_1234567890abcdefghij")
-
-    def test_message_too_long_characters(self):
-        message = ("a" * 1001) + " " + ("b" * 1000)
-        with pytest.raises(ChatAdsAPIError) as exc_info:
-            _validate_inputs(message, None, None, None, "mock_api_key_1234567890abcdefghij")
-        assert exc_info.value.code == "MESSAGE_TOO_LONG"
-        assert "2000 character" in str(exc_info.value)
-
-    def test_message_exactly_2000_characters(self):
-        # Should pass with 2 words and exactly 2000 characters
-        message = ("a" * 1000) + " " + ("b" * 999)
-        assert len(message) == 2000
-        _validate_inputs(message, None, None, None, "mock_api_key_1234567890abcdefghij")
-
-    # IP validation tests
-    def test_valid_ipv4(self):
-        _validate_inputs("test message", "192.168.1.1", None, None, "mock_api_key_1234567890abcdefghij")
-
-    def test_valid_ipv6(self):
-        _validate_inputs("test message", "2001:0db8::1", None, None, "mock_api_key_1234567890abcdefghij")
-
-    def test_invalid_ip_localhost(self):
-        with pytest.raises(ChatAdsAPIError) as exc_info:
-            _validate_inputs("test message", "localhost", None, None, "mock_api_key_1234567890abcdefghij")
-        assert exc_info.value.code == "INVALID_INPUT"
-        assert "Invalid IP" in str(exc_info.value)
-
-    def test_invalid_ip_incomplete(self):
-        with pytest.raises(ChatAdsAPIError) as exc_info:
-            _validate_inputs("test message", "192.168.1", None, None, "mock_api_key_1234567890abcdefghij")
-        assert exc_info.value.code == "INVALID_INPUT"
-
-    def test_invalid_ip_text(self):
-        with pytest.raises(ChatAdsAPIError) as exc_info:
-            _validate_inputs("test message", "not.an.ip", None, None, "mock_api_key_1234567890abcdefghij")
-        assert exc_info.value.code == "INVALID_INPUT"
-
-    # Country validation tests
-    def test_valid_country_us(self):
-        _validate_inputs("test message", None, "US", None, "mock_api_key_1234567890abcdefghij")
-
-    def test_valid_country_gb(self):
-        _validate_inputs("test message", None, "GB", None, "mock_api_key_1234567890abcdefghij")
-
-    def test_invalid_country_lowercase(self):
-        with pytest.raises(ChatAdsAPIError) as exc_info:
-            _validate_inputs("test message", None, "us", None, "mock_api_key_1234567890abcdefghij")
-        assert exc_info.value.code == "INVALID_INPUT"
-        assert "ISO 3166-1" in str(exc_info.value)
-
-    def test_invalid_country_three_letters(self):
-        with pytest.raises(ChatAdsAPIError) as exc_info:
-            _validate_inputs("test message", None, "USA", None, "mock_api_key_1234567890abcdefghij")
-        assert exc_info.value.code == "INVALID_INPUT"
-
-    def test_invalid_country_full_name(self):
-        with pytest.raises(ChatAdsAPIError) as exc_info:
-            _validate_inputs("test message", None, "United States", None, "mock_api_key_1234567890abcdefghij")
-        assert exc_info.value.code == "INVALID_INPUT"
-
-    def test_invalid_country_one_letter(self):
-        with pytest.raises(ChatAdsAPIError) as exc_info:
-            _validate_inputs("test message", None, "U", None, "mock_api_key_1234567890abcdefghij")
-        assert exc_info.value.code == "INVALID_INPUT"
-
-    # Language validation tests
-    def test_valid_language_en(self):
-        _validate_inputs("test message", None, None, "en", "mock_api_key_1234567890abcdefghij")
-
-    def test_valid_language_es(self):
-        _validate_inputs("test message", None, None, "es", "mock_api_key_1234567890abcdefghij")
-
-    def test_invalid_language_uppercase(self):
-        with pytest.raises(ChatAdsAPIError) as exc_info:
-            _validate_inputs("test message", None, None, "EN", "mock_api_key_1234567890abcdefghij")
-        assert exc_info.value.code == "INVALID_INPUT"
-        assert "ISO 639-1" in str(exc_info.value)
-
-    def test_invalid_language_three_letters(self):
-        with pytest.raises(ChatAdsAPIError) as exc_info:
-            _validate_inputs("test message", None, None, "eng", "mock_api_key_1234567890abcdefghij")
-        assert exc_info.value.code == "INVALID_INPUT"
-
-    def test_invalid_language_full_name(self):
-        with pytest.raises(ChatAdsAPIError) as exc_info:
-            _validate_inputs("test message", None, None, "English", "mock_api_key_1234567890abcdefghij")
-        assert exc_info.value.code == "INVALID_INPUT"
+    # Note: Message length/word count validation is done server-side
+    # The client just validates non-empty message and api_key
 
     # API key validation tests
     def test_valid_api_key_generic(self):
-        _validate_inputs("test message", None, None, None, "my_api_key_value")
+        # Should not raise
+        _validate_inputs("test message", "my_api_key_value")
 
     def test_invalid_api_key_empty(self):
         with pytest.raises(ChatAdsAPIError) as exc_info:
-            _validate_inputs("test message", None, None, None, "")
+            _validate_inputs("test message", "")
+        assert exc_info.value.code == "CONFIGURATION_ERROR"
+
+    def test_invalid_api_key_none(self):
+        with pytest.raises(ChatAdsAPIError) as exc_info:
+            _validate_inputs("test message", None)
         assert exc_info.value.code == "CONFIGURATION_ERROR"
 
 
@@ -249,21 +148,21 @@ class TestUsageSummarization:
     """Test usage data summarization."""
 
     def test_summarize_valid_usage(self):
+        # Note: Per CHA-326, minute_requests and minute_limit were removed from the API
         raw_usage = {
             "monthly_requests": 100,
             "free_tier_limit": 1000,
             "free_tier_remaining": 900,
             "daily_requests": 10,
             "daily_limit": 100,
-            "minute_requests": 1,
-            "minute_limit": 5,
             "is_free_tier": True,
-            "has_credit_card": False,
         }
         result = _summarize_usage(raw_usage)
         assert result["monthly"]["used"] == 100
         assert result["monthly"]["limit"] == 1000
         assert result["monthly"]["remaining"] == 900
+        assert result["daily"]["used"] == 10
+        assert result["daily"]["limit"] == 100
         assert result["is_free_tier"] is True
 
     def test_summarize_invalid_usage(self):
@@ -324,8 +223,7 @@ class TestMetadataBuilding:
                 "free_tier_remaining": 950,
                 "daily_requests": 5,
                 "daily_limit": 100,
-                "minute_requests": 1,
-                "minute_limit": 5,
+                "is_free_tier": True,
             },
         }
         result = _build_metadata(
@@ -496,28 +394,32 @@ class TestChatAdsAPIError:
 
 
 class TestRequestPayloadBuilding:
-    """Test request payload construction (size validation removed for performance)."""
+    """Test request payload construction.
+
+    Note: language and user_agent are NOT exposed per task requirements.
+    Only fields from the FunctionItem model that are approved for SDK exposure are included.
+    """
 
     def test_build_valid_payload(self):
         kwargs = {
             "message": "best laptop for coding",
             "ip": "8.8.8.8",
-            "user_agent": "Mozilla/5.0",
             "country": "US",
-            "language": "en",
+            "page_url": "https://example.com",
+            "domain": "example.com",
         }
         result = _build_request_payload(kwargs)
         assert result["message"] == "best laptop for coding"
         assert result["ip"] == "8.8.8.8"
-        assert result["userAgent"] == "Mozilla/5.0"
+        assert result["country"] == "US"
+        assert result["pageUrl"] == "https://example.com"
+        assert result["domain"] == "example.com"
 
     def test_build_payload_removes_none_values(self):
         kwargs = {
             "message": "test",
             "ip": None,
-            "user_agent": None,
             "country": None,
-            "language": None,
         }
         result = _build_request_payload(kwargs)
         assert result == {"message": "test"}
@@ -525,17 +427,15 @@ class TestRequestPayloadBuilding:
 
     def test_large_message_allowed(self):
         # Size validation removed - backend handles it
-        # Message length validation happens separately (max 2000 chars)
         long_message = "word " * 400  # ~2000 chars (within limit)
         kwargs = {
             "message": long_message,
             "ip": None,
-            "user_agent": None,
             "country": None,
-            "language": None,
         }
         result = _build_request_payload(kwargs)
-        assert result["message"] == long_message
+        # Note: _build_request_payload strips whitespace from message
+        assert result["message"] == long_message.strip()
 
 
 class TestCircuitBreaker:
@@ -611,13 +511,16 @@ class TestCircuitBreaker:
 
 
 class TestQuotaWarnings:
-    """Test quota warning system."""
+    """Test quota warning system.
+
+    Note: Per CHA-326, minute-level rate limits were removed from the API.
+    Only daily and monthly limits are checked now.
+    """
 
     def test_no_warning_when_usage_healthy(self):
         usage_summary = {
             "monthly": {"used": 100, "limit": 1000, "remaining": 900},
             "daily": {"used": 10, "limit": 100},
-            "minute": {"used": 1, "limit": 5},
         }
         warning = _check_quota_warnings(usage_summary)
         assert warning is None
@@ -626,7 +529,6 @@ class TestQuotaWarnings:
         usage_summary = {
             "monthly": {"used": 995, "limit": 1000, "remaining": 5},
             "daily": {"used": 10, "limit": 100},
-            "minute": {"used": 1, "limit": 5},
         }
         warning = _check_quota_warnings(usage_summary)
         assert warning is not None
@@ -636,27 +538,15 @@ class TestQuotaWarnings:
         usage_summary = {
             "monthly": {"used": 100, "limit": 1000, "remaining": 900},
             "daily": {"used": 95, "limit": 100},
-            "minute": {"used": 1, "limit": 5},
         }
         warning = _check_quota_warnings(usage_summary)
         assert warning is not None
         assert "95%" in warning or "Daily quota" in warning
 
-    def test_warning_when_minute_limit_approaching(self):
-        usage_summary = {
-            "monthly": {"used": 100, "limit": 1000, "remaining": 900},
-            "daily": {"used": 10, "limit": 100},
-            "minute": {"used": 4, "limit": 5},
-        }
-        warning = _check_quota_warnings(usage_summary)
-        assert warning is not None
-        assert "minute" in warning.lower()
-
     def test_multiple_warnings_combined(self):
         usage_summary = {
             "monthly": {"used": 995, "limit": 1000, "remaining": 5},
             "daily": {"used": 95, "limit": 100},
-            "minute": {"used": 4, "limit": 5},
         }
         warning = _check_quota_warnings(usage_summary)
         assert warning is not None
@@ -706,10 +596,7 @@ class TestIntegrationWithMockedHTTP:
                     "free_tier_remaining": 990,
                     "daily_requests": 5,
                     "daily_limit": 100,
-                    "minute_requests": 1,
-                    "minute_limit": 5,
                     "is_free_tier": True,
-                    "has_credit_card": False,
                 },
             },
         }
@@ -846,7 +733,11 @@ class TestIntegrationWithMockedHTTP:
     @pytest.mark.asyncio
     @patch("chatads_mcp_wrapper.httpx.AsyncClient")
     async def test_invalid_input_fails_before_api_call(self, mock_client_class, monkeypatch):
-        """Test that validation errors don't make API calls."""
+        """Test that empty message validation errors don't make API calls.
+
+        Note: Client-side validation only checks for empty message and api_key.
+        Other validation (country format, etc.) is done server-side.
+        """
         monkeypatch.setenv("CHATADS_API_KEY", "mock_api_key_test1234567890abcdef")
 
         mock_client = AsyncMock()
@@ -854,7 +745,8 @@ class TestIntegrationWithMockedHTTP:
 
         from chatads_mcp_wrapper import run_chatads_message_send
 
-        result = await run_chatads_message_send("test message", country="USA")
+        # Empty message should fail client-side validation
+        result = await run_chatads_message_send("")
 
         assert result["status"] == "error"
         assert result["error_code"] == "INVALID_INPUT"
