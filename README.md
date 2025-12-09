@@ -89,16 +89,14 @@ Restart Claude Desktop and the tool will be available.
 
 ```text
 chatads_message_send(
-    message: str,
-    ip?: str,
-    country?: str,
-    page_url?: str,
-    domain?: str,
-    message_analysis?: "fast" | "balanced" | "thorough",
-    fill_priority?: "speed" | "coverage",
-    min_intent?: "any" | "low" | "medium" | "high",
-    skip_message_analysis?: bool,
-    api_key?: str
+    message: str,                                          # Required: 1-5000 chars
+    ip?: str,                                              # Optional: client IP for geo-detection (max 64 chars)
+    country?: str,                                         # Optional: ISO 3166-1 alpha-2 code (e.g., 'US')
+    message_analysis?: "fast" | "balanced" | "thorough",   # Optional: default "balanced"
+    fill_priority?: "speed" | "coverage",                  # Optional: default "coverage"
+    min_intent?: "any" | "low" | "medium" | "high",        # Optional: default "low"
+    skip_message_analysis?: bool,                          # Optional: default false
+    api_key?: str                                          # Optional: override env var
 ) -> {
     status: "success" | "no_match" | "error",
     matched: bool,

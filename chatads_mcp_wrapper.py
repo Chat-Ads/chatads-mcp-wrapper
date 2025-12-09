@@ -97,23 +97,11 @@ TOOL_VERSION = "0.1.0"
 # Pre-compiled regex patterns for performance
 _API_KEY_REDACTION = "[CHATADS_API_KEY]"
 
-# FunctionItem field handling mirrors the SDKs
+# FunctionItem field handling - only the 7 allowed fields per OpenAPI spec
 _FUNCTION_ITEM_OPTIONAL_FIELDS = frozenset(
     {
-        "page_url",
-        "page_title",
-        "referrer",
-        "address",
-        "email",
-        "type",
-        "domain",
         "ip",
-        "reason",
-        "company",
-        "name",
         "country",
-        "override_parsing",
-        "response_quality",
         "message_analysis",
         "fill_priority",
         "min_intent",
@@ -121,34 +109,14 @@ _FUNCTION_ITEM_OPTIONAL_FIELDS = frozenset(
     }
 )
 _FIELD_TO_PAYLOAD_KEY = {
-    "page_url": "pageUrl",
-    "page_title": "pageTitle",
-    "referrer": "referrer",
-    "address": "address",
-    "email": "email",
-    "type": "type",
-    "domain": "domain",
     "ip": "ip",
-    "reason": "reason",
-    "company": "company",
-    "name": "name",
     "country": "country",
-    "override_parsing": "override_parsing",
-    "response_quality": "response_quality",
     "message_analysis": "message_analysis",
     "fill_priority": "fill_priority",
     "min_intent": "min_intent",
     "skip_message_analysis": "skip_message_analysis",
 }
 _FIELD_ALIAS_LOOKUP = {
-    "pageurl": "page_url",
-    "pagetitle": "page_title",
-    "page_title": "page_title",
-    "page_url": "page_url",
-    "overrideparsing": "override_parsing",
-    "override_parsing": "override_parsing",
-    "responsequality": "response_quality",
-    "response_quality": "response_quality",
     "messageanalysis": "message_analysis",
     "message_analysis": "message_analysis",
     "fillpriority": "fill_priority",
@@ -158,7 +126,8 @@ _FIELD_ALIAS_LOOKUP = {
     "skipmessageanalysis": "skip_message_analysis",
     "skip_message_analysis": "skip_message_analysis",
 }
-RESERVED_PAYLOAD_KEYS = frozenset({"message", *(_FIELD_TO_PAYLOAD_KEY.values())})
+# Reserved payload keys - the 7 allowed fields per OpenAPI spec
+RESERVED_PAYLOAD_KEYS = frozenset({"message", "ip", "country", "message_analysis", "fill_priority", "min_intent", "skip_message_analysis"})
 
 # Global HTTP client cache for connection pooling (keyed by API key)
 # Reusing connections eliminates DNS lookup, TCP handshake, and TLS negotiation overhead
@@ -833,20 +802,8 @@ def _error_envelope_from_exc(
 
 async def run_chatads_message_send(
     message: str,
-    page_url: Optional[str] = None,
-    page_title: Optional[str] = None,
-    referrer: Optional[str] = None,
-    address: Optional[str] = None,
-    email: Optional[str] = None,
-    type: Optional[str] = None,
-    domain: Optional[str] = None,
     ip: Optional[str] = None,
-    reason: Optional[str] = None,
-    company: Optional[str] = None,
-    name: Optional[str] = None,
     country: Optional[str] = None,
-    override_parsing: Optional[bool] = None,
-    response_quality: Optional[str] = None,
     message_analysis: Optional[str] = None,
     fill_priority: Optional[str] = None,
     min_intent: Optional[str] = None,
@@ -858,15 +815,14 @@ async def run_chatads_message_send(
     Send a message to ChatAds and fetch normalized affiliate recommendations (async).
 
     Args:
-        message: User query that needs affiliate suggestions.
-        ip: Optional IP used for geo filters (ex. "8.8.8.8").
-        country: Optional ISO 3166-1 alpha-2 country code (e.g., 'US', 'GB').
-        page_url: Optional page URL for context.
-        domain: Optional domain for context.
-        message_analysis: Extraction method - 'fast' (NLP), 'balanced' (default), 'thorough' (LLM+NLP).
-        fill_priority: URL resolution - 'speed' (skip fallbacks), 'coverage' (default, full chain).
+        message: User query that needs affiliate suggestions (1-5000 chars, required).
+        ip: Client IP address for geo-detection (max 64 chars, optional).
+        country: ISO 3166-1 alpha-2 country code for geo-targeting (e.g., 'US', 'GB'). Skips IP detection if provided.
+        message_analysis: Keyword extraction method - 'fast' (NLP ~50ms), 'balanced' (default ~150ms), 'thorough' (LLM ~300ms).
+        fill_priority: URL resolution - 'speed' (skip Serper fallback), 'coverage' (default, full chain).
         min_intent: Minimum purchase intent - 'any', 'low' (default), 'medium', 'high'.
-        skip_message_analysis: Skip NLP/LLM extraction and use message directly as search query.
+        skip_message_analysis: Skip NLP/LLM extraction and use message directly as search query (default: false).
+        extra_fields: Additional fields (advanced usage only).
         api_key: Optional API key override; falls back to CHATADS_API_KEY env var.
     """
     client: Optional[ChatAdsClient] = None
@@ -883,20 +839,8 @@ async def run_chatads_message_send(
         payload = _build_request_payload(
             {
                 "message": message.strip(),
-                "page_url": page_url,
-                "page_title": page_title,
-                "referrer": referrer,
-                "address": address,
-                "email": email,
-                "type": type,
-                "domain": domain,
                 "ip": ip,
-                "reason": reason,
-                "company": company,
-                "name": name,
                 "country": country,
-                "override_parsing": override_parsing,
-                "response_quality": response_quality,
                 "message_analysis": message_analysis,
                 "fill_priority": fill_priority,
                 "min_intent": min_intent,
