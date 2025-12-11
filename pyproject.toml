@@ -1,6 +1,6 @@
 [project]
 name = "chatads-mcp-wrapper"
-version = "0.1.6"
+version = "0.1.8"
 description = "Model Context Protocol (MCP) wrapper for ChatAds Affiliate API with async support"
 authors = [
     {name = "ChatAds Team", email = "support@chatads.com"}
