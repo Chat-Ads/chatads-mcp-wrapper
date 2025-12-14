@@ -818,7 +818,7 @@ async def run_chatads_message_send(
         message: User query that needs affiliate suggestions (1-5000 chars, required).
         ip: Client IP address for geo-detection (max 64 chars, optional).
         country: ISO 3166-1 alpha-2 country code for geo-targeting (e.g., 'US', 'GB'). Skips IP detection if provided.
-        message_analysis: Keyword extraction method - 'fast' (NLP ~50ms), 'balanced' (default ~150ms), 'thorough' (LLM ~300ms).
+        message_analysis: Keyword extraction method - 'fast' (NLP ~50ms) or 'thorough' (default, LLM ~300ms).
         fill_priority: URL resolution - 'speed' (skip Serper fallback), 'coverage' (default, full chain).
         min_intent: Minimum purchase intent - 'any', 'low' (default), 'medium', 'high'.
         skip_message_analysis: Skip NLP/LLM extraction and use message directly as search query (default: false).

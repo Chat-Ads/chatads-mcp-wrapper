@@ -90,12 +90,12 @@ Restart Claude Desktop and the tool will be available.
 ```text
 chatads_message_send(
     message: str,                                          # Required: 1-5000 chars
-    ip?: str,                                              # Optional: client IP for geo-detection (max 64 chars)
-    country?: str,                                         # Optional: ISO 3166-1 alpha-2 code (e.g., 'US')
-    message_analysis?: "fast" | "balanced" | "thorough",   # Optional: default "balanced"
-    fill_priority?: "speed" | "coverage",                  # Optional: default "coverage"
-    min_intent?: "any" | "low" | "medium" | "high",        # Optional: default "low"
-    skip_message_analysis?: bool,                          # Optional: default false
+    ip?: str,                                              # IPv4 address for country detection (max 64 chars)
+    country?: str,                                         # Country code (e.g., 'US'). If provided, skips IP-based country detection
+    message_analysis?: "fast" | "thorough",                # Controls keyword extraction. 'fast' = speed, 'thorough' (default) = best keywords
+    fill_priority?: "speed" | "coverage",                  # Controls affiliate link discovery. 'speed' or 'coverage' (default)
+    min_intent?: "any" | "low" | "medium" | "high",        # Min purchase intent. 'any'/'low' (default)/'medium'/'high'
+    skip_message_analysis?: bool,                          # Treat message as product keyword directly (default: false)
     api_key?: str                                          # Optional: override env var
 ) -> {
     status: "success" | "no_match" | "error",
