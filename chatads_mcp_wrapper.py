@@ -9,7 +9,7 @@ Usage:
     1. Install via PyPI: `pip install chatads-mcp-wrapper`
     2. Export your API key: `export CHATADS_API_KEY=your_chatads_api_key`
     3. Optional overrides:
-         - CHATADS_API_BASE_URL (default: https://chatads--chatads-api-fastapiserver-serve.modal.run)
+         - CHATADS_API_BASE_URL (default: https://api.getchatads.com)
          - CHATADS_API_ENDPOINT (default: /v1/chatads/messages)
          - CHATADS_MCP_MAX_RETRIES (default: 3)
          - CHATADS_MCP_TIMEOUT (seconds, default: 15)
@@ -82,7 +82,7 @@ if not LOGGER.handlers:
 # Defaults can be overridden with env vars noted in the module docstring.
 DEFAULT_BASE_URL = os.getenv(
     "CHATADS_API_BASE_URL",
-    "https://chatads--chatads-api-fastapiserver-serve.modal.run",
+    "https://api.getchatads.com",
 )
 DEFAULT_ENDPOINT = os.getenv("CHATADS_API_ENDPOINT", "/v1/chatads/messages")
 DEFAULT_TIMEOUT = float(os.getenv("CHATADS_MCP_TIMEOUT", "10"))  # Reduced from 15s to allow faster retries
@@ -97,7 +97,7 @@ TOOL_VERSION = "0.1.0"
 # Pre-compiled regex patterns for performance
 _API_KEY_REDACTION = "[CHATADS_API_KEY]"
 
-# FunctionItem field handling - only the 7 allowed fields per OpenAPI spec
+# FunctionItem field handling - the 8 optional fields per OpenAPI spec (plus message = 9 total)
 _FUNCTION_ITEM_OPTIONAL_FIELDS = frozenset(
     {
         "ip",
@@ -106,6 +106,8 @@ _FUNCTION_ITEM_OPTIONAL_FIELDS = frozenset(
         "fill_priority",
         "min_intent",
         "skip_message_analysis",
+        "demo",
+        "max_offers",
     }
 )
 _FIELD_TO_PAYLOAD_KEY = {
@@ -115,6 +117,8 @@ _FIELD_TO_PAYLOAD_KEY = {
     "fill_priority": "fill_priority",
     "min_intent": "min_intent",
     "skip_message_analysis": "skip_message_analysis",
+    "demo": "demo",
+    "max_offers": "max_offers",
 }
 _FIELD_ALIAS_LOOKUP = {
     "messageanalysis": "message_analysis",
@@ -125,9 +129,11 @@ _FIELD_ALIAS_LOOKUP = {
     "min_intent": "min_intent",
     "skipmessageanalysis": "skip_message_analysis",
     "skip_message_analysis": "skip_message_analysis",
+    "maxoffers": "max_offers",
+    "max_offers": "max_offers",
 }
-# Reserved payload keys - the 7 allowed fields per OpenAPI spec
-RESERVED_PAYLOAD_KEYS = frozenset({"message", "ip", "country", "message_analysis", "fill_priority", "min_intent", "skip_message_analysis"})
+# Reserved payload keys - the 9 allowed fields per OpenAPI spec
+RESERVED_PAYLOAD_KEYS = frozenset({"message", "ip", "country", "message_analysis", "fill_priority", "min_intent", "skip_message_analysis", "demo", "max_offers"})
 
 # Global HTTP client cache for connection pooling (keyed by API key)
 # Reusing connections eliminates DNS lookup, TCP handshake, and TLS negotiation overhead
@@ -263,11 +269,9 @@ class ToolEnvelope(BaseModel):
     """Normalized payload returned by the MCP tool."""
 
     status: Literal["success", "no_match", "error"]
-    matched: bool
-    product: Optional[str] = None
-    affiliate_link: Optional[str] = None
-    category: Optional[str] = None
-    affiliate_message: Optional[str] = None
+    offers: Optional[list] = None
+    offers_requested: Optional[int] = None
+    offers_returned: Optional[int] = None
     reason: Optional[str] = None
     error_code: Optional[str] = None
     error_message: Optional[str] = None
@@ -353,7 +357,7 @@ class ChatAdsClient:
                     ),
                 )
                 _http_client_cache[cache_key] = self._client
-                self._owns_client = True  # First instance owns the client
+                self._owns_client = False  # Cached clients are never closed by individual requests
 
         # Initialize circuit breaker if enabled
         if self.config.enable_circuit_breaker:
@@ -645,18 +649,34 @@ def normalize_envelope(
 
     if raw.get("success"):
         data = raw.get("data") or {}
-        ad = data.get("ad") or {}
-        matched = bool(data.get("matched"))
-        status: Literal["success", "no_match"] = "success" if matched else "no_match"
-        reason = _normalize_reason(data.get("reason"))
+        raw_offers = data.get("Offers") or []
+        returned = int(data.get("Returned", 0))
+        requested = int(data.get("Requested", 1))
+        has_offers = returned > 0
+        status: Literal["success", "no_match"] = "success" if has_offers else "no_match"
+
+        offers = None
+        if raw_offers:
+            offers = [
+                {
+                    "link_text": o.get("LinkText"),
+                    "url": o.get("URL"),
+                    "category": o.get("Category"),
+                    "status": o.get("Status"),
+                    "intent_level": o.get("IntentLevel"),
+                    "intent_score": o.get("IntentScore"),
+                    "search_term": o.get("SearchTerm"),
+                    "reason": o.get("Reason"),
+                    "product": o.get("Product"),
+                }
+                for o in raw_offers
+            ]
+
         envelope = ToolEnvelope(
             status=status,
-            matched=matched,
-            product=(ad.get("product") or None),
-            affiliate_link=(ad.get("link") or None),
-            category=(ad.get("category") or None),
-            affiliate_message=(ad.get("message") or None),
-            reason=reason,
+            offers=offers,
+            offers_requested=requested,
+            offers_returned=returned,
             metadata=metadata,
         )
         return envelope
@@ -668,7 +688,6 @@ def normalize_envelope(
     ) else None
     envelope = ToolEnvelope(
         status="error",
-        matched=False,
         reason=normalized_reason,
         error_code=error_code,
         error_message=_friendly_error_message(error_code, error.get("message")),
@@ -792,7 +811,6 @@ def _error_envelope_from_exc(
     )
     envelope = ToolEnvelope(
         status="error",
-        matched=False,
         error_code=exc.code,
         error_message=_friendly_error_message(exc.code, str(exc)),
         metadata=metadata,
@@ -808,6 +826,8 @@ async def run_chatads_message_send(
     fill_priority: Optional[str] = None,
     min_intent: Optional[str] = None,
     skip_message_analysis: Optional[bool] = None,
+    demo: Optional[bool] = None,
+    max_offers: Optional[int] = None,
     extra_fields: Optional[Dict[str, Any]] = None,
     api_key: Optional[str] = None,
 ) -> Dict[str, Any]:
@@ -816,12 +836,14 @@ async def run_chatads_message_send(
 
     Args:
         message: User query that needs affiliate suggestions (1-5000 chars, required).
-        ip: Client IP address for geo-detection (max 64 chars, optional).
+        ip: Client IP address for geo-detection (max 45 chars, optional).
         country: ISO 3166-1 alpha-2 country code for geo-targeting (e.g., 'US', 'GB'). Skips IP detection if provided.
         message_analysis: Keyword extraction method - 'fast' (NLP ~50ms) or 'thorough' (default, LLM ~300ms).
         fill_priority: URL resolution - 'speed' (skip Serper fallback), 'coverage' (default, full chain).
         min_intent: Minimum purchase intent - 'any', 'low' (default), 'medium', 'high'.
         skip_message_analysis: Skip NLP/LLM extraction and use message directly as search query (default: false).
+        demo: Demo mode flag (default: false).
+        max_offers: Maximum number of affiliate offers to return (1-2, default: 1).
         extra_fields: Additional fields (advanced usage only).
         api_key: Optional API key override; falls back to CHATADS_API_KEY env var.
     """
@@ -845,6 +867,8 @@ async def run_chatads_message_send(
                 "fill_priority": fill_priority,
                 "min_intent": min_intent,
                 "skip_message_analysis": skip_message_analysis,
+                "demo": demo,
+                "max_offers": max_offers,
                 "extra_fields": extra_fields,
             }
         )

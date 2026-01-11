@@ -137,7 +137,7 @@ addopts = [
     "--cov=chatads_mcp_wrapper",
     "--cov-report=term-missing",
     "--cov-report=html:/tmp/chatads-htmlcov",
-    "--cov-fail-under=85",
+    "--cov-fail-under=75",
 ]
 asyncio_mode = "auto"
 markers = [

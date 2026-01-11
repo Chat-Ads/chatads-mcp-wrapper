@@ -251,37 +251,44 @@ class TestMetadataBuilding:
 class TestEnvelopeNormalization:
     """Test response envelope normalization."""
 
-    def test_normalize_success_with_match(self):
+    def test_normalize_success_with_offers(self):
         raw = {
             "success": True,
             "data": {
-                "matched": True,
-                "ad": {
-                    "product": "MacBook Pro",
-                    "link": "https://amazon.com/...",
-                    "category": "laptops",
-                    "message": "Great for coding!",
-                },
-                "reason": "exact_match: high confidence",
+                "Offers": [
+                    {
+                        "LinkText": "laptop",
+                        "URL": "https://amazon.com/macbook",
+                        "Category": "laptops",
+                        "Status": "filled",
+                        "IntentLevel": "high",
+                        "Product": {
+                            "Title": "MacBook Pro",
+                            "Description": "Great for coding!",
+                        },
+                    }
+                ],
+                "Requested": 1,
+                "Returned": 1,
             },
             "meta": {"request_id": "req_1"},
         }
         result = normalize_envelope(raw, status_code=200, latency_ms=100.0, source_url="https://api.test")
         assert result.status == "success"
-        assert result.matched is True
-        assert result.product == "MacBook Pro"
-        assert result.affiliate_link == "https://amazon.com/..."
+        assert result.offers_returned == 1
+        assert len(result.offers) == 1
+        assert result.offers[0]["link_text"] == "laptop"
+        assert result.offers[0]["url"] == "https://amazon.com/macbook"
 
     def test_normalize_no_match(self):
         raw = {
             "success": True,
-            "data": {"matched": False, "reason": "no_match: insufficient context"},
+            "data": {"Offers": [], "Requested": 1, "Returned": 0},
             "meta": {"request_id": "req_2"},
         }
         result = normalize_envelope(raw, status_code=200, latency_ms=100.0, source_url="https://api.test")
         assert result.status == "no_match"
-        assert result.matched is False
-        assert "No match" in result.reason
+        assert result.offers_returned == 0
 
     def test_normalize_error_response(self):
         raw = {
@@ -294,7 +301,6 @@ class TestEnvelopeNormalization:
         }
         result = normalize_envelope(raw, status_code=429, latency_ms=50.0, source_url="https://api.test")
         assert result.status == "error"
-        assert result.matched is False
         assert result.error_code == "QUOTA_EXCEEDED"
 
 
@@ -405,15 +411,15 @@ class TestRequestPayloadBuilding:
             "message": "best laptop for coding",
             "ip": "8.8.8.8",
             "country": "US",
-            "page_url": "https://example.com",
-            "domain": "example.com",
+            "message_analysis": "thorough",
+            "fill_priority": "coverage",
         }
         result = _build_request_payload(kwargs)
         assert result["message"] == "best laptop for coding"
         assert result["ip"] == "8.8.8.8"
         assert result["country"] == "US"
-        assert result["pageUrl"] == "https://example.com"
-        assert result["domain"] == "example.com"
+        assert result["message_analysis"] == "thorough"
+        assert result["fill_priority"] == "coverage"
 
     def test_build_payload_removes_none_values(self):
         kwargs = {
@@ -577,19 +583,25 @@ class TestIntegrationWithMockedHTTP:
         mock_response.json.return_value = {
             "success": True,
             "data": {
-                "matched": True,
-                "ad": {
-                    "product": "MacBook Pro M3",
-                    "link": "https://amazon.com/macbook-pro",
-                    "category": "laptops",
-                    "message": "Perfect for developers!",
-                },
-                "reason": "exact_match: high confidence",
+                "Offers": [
+                    {
+                        "LinkText": "laptop",
+                        "URL": "https://amazon.com/macbook-pro",
+                        "Category": "laptops",
+                        "Status": "filled",
+                        "IntentLevel": "high",
+                        "Product": {
+                            "Title": "MacBook Pro M3",
+                            "Description": "Perfect for developers!",
+                        },
+                    }
+                ],
+                "Requested": 1,
+                "Returned": 1,
             },
             "meta": {
                 "request_id": "req_abc123",
                 "country": "US",
-                "language": "en",
                 "usage": {
                     "monthly_requests": 10,
                     "free_tier_limit": 1000,
@@ -610,9 +622,9 @@ class TestIntegrationWithMockedHTTP:
         result = await run_chatads_message_send("best laptop for coding")
 
         assert result["status"] == "success"
-        assert result["matched"] is True
-        assert result["product"] == "MacBook Pro M3"
-        assert result["affiliate_link"] == "https://amazon.com/macbook-pro"
+        assert result["offers_returned"] == 1
+        assert len(result["offers"]) == 1
+        assert result["offers"][0]["url"] == "https://amazon.com/macbook-pro"
         assert result["metadata"]["request_id"] == "req_abc123"
 
     @pytest.mark.asyncio
@@ -626,8 +638,9 @@ class TestIntegrationWithMockedHTTP:
         mock_response.json.return_value = {
             "success": True,
             "data": {
-                "matched": False,
-                "reason": "no_match: insufficient context",
+                "Offers": [],
+                "Requested": 1,
+                "Returned": 0,
             },
             "meta": {"request_id": "req_xyz789"},
         }
@@ -641,8 +654,7 @@ class TestIntegrationWithMockedHTTP:
         result = await run_chatads_message_send("random text here")
 
         assert result["status"] == "no_match"
-        assert result["matched"] is False
-        assert "No match" in result["reason"]
+        assert result["offers_returned"] == 0
 
     @pytest.mark.asyncio
     @patch("chatads_mcp_wrapper.httpx.AsyncClient")

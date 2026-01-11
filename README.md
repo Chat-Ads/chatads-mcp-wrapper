@@ -15,7 +15,7 @@ This directory houses the Model Context Protocol (MCP) wrapper that exposes the 
 - Environment variables:
   - `CHATADS_API_KEY` – your ChatAds API key (required)
   - Optional overrides:
-    - `CHATADS_API_BASE_URL` (default: Modal deployment URL)
+    - `CHATADS_API_BASE_URL` (default: https://api.getchatads.com)
     - `CHATADS_API_ENDPOINT` (default: /v1/chatads/messages)
     - `CHATADS_MCP_TIMEOUT` (default: 15 seconds)
     - `CHATADS_MCP_MAX_RETRIES` (default: 3)
@@ -76,7 +76,7 @@ Add a server entry to `claude_desktop_config.json` (path varies per OS):
       "args": [],
       "env": {
         "CHATADS_API_KEY": "your_chatads_api_key",
-        "CHATADS_API_BASE_URL": "https://chatads--chatads-api-fastapiserver-serve.modal.run"
+        "CHATADS_API_BASE_URL": "https://api.getchatads.com"
       }
     }
   }
@@ -90,20 +90,32 @@ Restart Claude Desktop and the tool will be available.
 ```text
 chatads_message_send(
     message: str,                                          # Required: 1-5000 chars
-    ip?: str,                                              # IPv4 address for country detection (max 64 chars)
+    ip?: str,                                              # IPv4/IPv6 address for country detection (max 45 chars)
     country?: str,                                         # Country code (e.g., 'US'). If provided, skips IP-based country detection
     message_analysis?: "fast" | "thorough",                # Controls keyword extraction. 'fast' = speed, 'thorough' (default) = best keywords
     fill_priority?: "speed" | "coverage",                  # Controls affiliate link discovery. 'speed' or 'coverage' (default)
     min_intent?: "any" | "low" | "medium" | "high",        # Min purchase intent. 'any'/'low' (default)/'medium'/'high'
     skip_message_analysis?: bool,                          # Treat message as product keyword directly (default: false)
+    demo?: bool,                                           # Demo mode flag (default: false)
+    max_offers?: int,                                      # Max affiliate offers to return (1-2, default: 1)
     api_key?: str                                          # Optional: override env var
 ) -> {
     status: "success" | "no_match" | "error",
-    matched: bool,
-    product?: str,
-    affiliate_link?: str,
-    category?: str,
-    affiliate_message?: str,
+    offers?: [
+        {
+            link_text: str,                                # Text to use for affiliate link
+            url: str,                                      # Affiliate URL
+            category?: str,                                # Product category
+            status: str,                                   # "filled", "scored", or "failed"
+            intent_level: str,                             # Intent classification
+            intent_score?: float,                          # Intent score (0.0-1.0)
+            search_term?: str,                             # Search term used
+            reason?: str,                                  # Status reason
+            product?: { Title?: str, Description?: str }   # Product metadata
+        }
+    ],
+    offers_requested?: int,
+    offers_returned?: int,
     reason?: str,
     error_code?: str,
     error_message?: str,
@@ -207,7 +219,7 @@ Emitted metrics:
 | `FORBIDDEN` / `UNAUTHORIZED` | Invalid or revoked key | Verify the key in Supabase / dashboard; rotate if needed. |
 | `DAILY_QUOTA_EXCEEDED` / `QUOTA_EXCEEDED` | Hitting daily or monthly caps | Respect `metadata.notes` and retry after the implied window or upgrade the plan. |
 | `CIRCUIT_BREAKER_OPEN` | Too many consecutive failures | Circuit breaker is protecting against failed requests. Wait 60 seconds. |
-| `UPSTREAM_UNAVAILABLE` | Network outage or repeated 5xx | Wait/backoff; confirm Modal deployment health; consider raising `CHATADS_MCP_MAX_RETRIES`. |
+| `UPSTREAM_UNAVAILABLE` | Network outage or repeated 5xx | Wait/backoff; confirm API health; consider raising `CHATADS_MCP_MAX_RETRIES`. |
 | `INVALID_INPUT` | Empty message or <2 words | Provide more descriptive user text; sanitize before sending. |
 | `REQUEST_TOO_LARGE` | Payload exceeds size limit | Reduce message length or increase `CHATADS_MAX_REQUEST_SIZE`. |
 

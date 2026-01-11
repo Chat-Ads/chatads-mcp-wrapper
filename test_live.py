@@ -26,19 +26,23 @@ async def test_basic_lookup():
     )
 
     print(f"Status: {result['status']}")
-    print(f"Matched: {result['matched']}")
+    offers = result.get('offers', [])
+    print(f"Offers returned: {len(offers)}")
 
     if result['status'] == 'error':
         print(f"❌ Error: {result['error_code']}")
         print(f"   Message: {result['error_message']}")
         return False
 
-    if result['matched']:
-        print(f"✅ Product: {result['product']}")
-        print(f"   Category: {result['category']}")
-        print(f"   Link: {result['affiliate_link'][:60]}...")
+    if offers:
+        offer = offers[0]
+        product = offer.get('product') or {}
+        print(f"✅ Product: {product.get('Title', 'N/A')}")
+        print(f"   Link text: {offer.get('link_text', 'N/A')}")
+        url = offer.get('url', 'N/A')
+        print(f"   URL: {url[:60] if url else 'N/A'}...")
     else:
-        print(f"ℹ️ No match: {result.get('reason', 'N/A')}")
+        print(f"ℹ️ No offers: {result.get('reason', 'N/A')}")
 
     print(f"\n📊 Metadata:")
     print(f"   Request ID: {result['metadata']['request_id']}")
@@ -80,7 +84,8 @@ async def test_concurrent():
     print(f"Throughput: {len(results) / (elapsed / 1000):.1f} req/s\n")
 
     for i, (query, result) in enumerate(zip(queries, results), 1):
-        status = "✅" if result['matched'] else "❌"
+        has_offers = len(result.get('offers', [])) > 0
+        status = "✅" if has_offers else "❌"
         print(f"{i}. {status} {query} - {result['status']}")
 
     print()
