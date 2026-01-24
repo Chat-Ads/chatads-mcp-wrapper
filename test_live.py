@@ -84,7 +84,8 @@ async def test_concurrent():
     print(f"Throughput: {len(results) / (elapsed / 1000):.1f} req/s\n")
 
     for i, (query, result) in enumerate(zip(queries, results), 1):
-        has_offers = len(result.get('offers', [])) > 0
+        offers = result.get('offers') or []
+        has_offers = len(offers) > 0
         status = "✅" if has_offers else "❌"
         print(f"{i}. {status} {query} - {result['status']}")
 
