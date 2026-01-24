@@ -92,25 +92,19 @@ chatads_message_send(
     message: str,                                          # Required: 1-5000 chars
     ip?: str,                                              # IPv4/IPv6 address for country detection (max 45 chars)
     country?: str,                                         # Country code (e.g., 'US'). If provided, skips IP-based country detection
-    message_analysis?: "fast" | "thorough",                # Controls keyword extraction. 'fast' = speed, 'thorough' (default) = best keywords
-    fill_priority?: "speed" | "coverage",                  # Controls affiliate link discovery. 'speed' or 'coverage' (default)
-    min_intent?: "any" | "low" | "medium" | "high",        # Min purchase intent. 'any'/'low' (default)/'medium'/'high'
-    skip_message_analysis?: bool,                          # Treat message as product keyword directly (default: false)
-    demo?: bool,                                           # Demo mode flag (default: false)
-    max_offers?: int,                                      # Max affiliate offers to return (1-2, default: 1)
+    quality?: "fast" | "standard" | "best",                # Resolution quality. 'fast', 'standard' (default), or 'best'
     api_key?: str                                          # Optional: override env var
 ) -> {
     status: "success" | "no_match" | "error",
+    response_status?: "filled" | "partial_fill" | "no_offers_found" | "internal_error",  # API response status
     offers?: [
         {
             link_text: str,                                # Text to use for affiliate link
-            url: str,                                      # Affiliate URL
+            url: str,                                      # Affiliate URL (always populated)
             category?: str,                                # Product category
-            status: str,                                   # "filled", "scored", or "failed"
             intent_level: str,                             # Intent classification
             intent_score?: float,                          # Intent score (0.0-1.0)
             search_term?: str,                             # Search term used
-            reason?: str,                                  # Status reason
             product?: { Title?: str, Description?: str }   # Product metadata
         }
     ],

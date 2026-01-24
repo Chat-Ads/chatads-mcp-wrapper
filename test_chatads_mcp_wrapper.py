@@ -253,24 +253,24 @@ class TestEnvelopeNormalization:
 
     def test_normalize_success_with_offers(self):
         raw = {
-            "success": True,
             "data": {
-                "Offers": [
+                "status": "filled",
+                "offers": [
                     {
-                        "LinkText": "laptop",
-                        "URL": "https://amazon.com/macbook",
-                        "Category": "laptops",
-                        "Status": "filled",
-                        "IntentLevel": "high",
-                        "Product": {
-                            "Title": "MacBook Pro",
-                            "Description": "Great for coding!",
+                        "link_text": "laptop",
+                        "url": "https://amazon.com/macbook",
+                        "category": "laptops",
+                        "confidence_level": "high",
+                        "product": {
+                            "title": "MacBook Pro",
+                            "description": "Great for coding!",
                         },
                     }
                 ],
-                "Requested": 1,
-                "Returned": 1,
+                "requested": 1,
+                "returned": 1,
             },
+            "error": None,
             "meta": {"request_id": "req_1"},
         }
         result = normalize_envelope(raw, status_code=200, latency_ms=100.0, source_url="https://api.test")
@@ -282,8 +282,8 @@ class TestEnvelopeNormalization:
 
     def test_normalize_no_match(self):
         raw = {
-            "success": True,
-            "data": {"Offers": [], "Requested": 1, "Returned": 0},
+            "data": {"status": "no_offers_found", "offers": [], "requested": 1, "returned": 0},
+            "error": None,
             "meta": {"request_id": "req_2"},
         }
         result = normalize_envelope(raw, status_code=200, latency_ms=100.0, source_url="https://api.test")
@@ -292,7 +292,7 @@ class TestEnvelopeNormalization:
 
     def test_normalize_error_response(self):
         raw = {
-            "success": False,
+            "data": None,
             "error": {
                 "code": "QUOTA_EXCEEDED",
                 "message": "Monthly quota reached",
@@ -322,7 +322,7 @@ class TestChatAdsClient:
     async def test_fetch_success(self, mock_client_class):
         mock_response = Mock()
         mock_response.status_code = 200
-        mock_response.json.return_value = {"success": True, "data": {}}
+        mock_response.json.return_value = {"data": {}, "error": None}
 
         mock_client = AsyncMock()
         mock_client.post.return_value = mock_response
@@ -332,7 +332,7 @@ class TestChatAdsClient:
         client = ChatAdsClient("mock_api_key_123", config)
         data, status_code, latency_ms = await client.fetch({"message": "test"})
 
-        assert data == {"success": True, "data": {}}
+        assert data == {"data": {}, "error": None}
         assert status_code == 200
         assert latency_ms > 0
         await client.aclose()
@@ -411,15 +411,15 @@ class TestRequestPayloadBuilding:
             "message": "best laptop for coding",
             "ip": "8.8.8.8",
             "country": "US",
-            "message_analysis": "thorough",
-            "fill_priority": "coverage",
+            "extraction_mode": "fast",
+            "quality": "standard",
         }
         result = _build_request_payload(kwargs)
         assert result["message"] == "best laptop for coding"
         assert result["ip"] == "8.8.8.8"
         assert result["country"] == "US"
-        assert result["message_analysis"] == "thorough"
-        assert result["fill_priority"] == "coverage"
+        assert result["extraction_mode"] == "fast"
+        assert result["quality"] == "standard"
 
     def test_build_payload_removes_none_values(self):
         kwargs = {
@@ -581,24 +581,24 @@ class TestIntegrationWithMockedHTTP:
         mock_response = Mock()
         mock_response.status_code = 200
         mock_response.json.return_value = {
-            "success": True,
             "data": {
-                "Offers": [
+                "status": "filled",
+                "offers": [
                     {
-                        "LinkText": "laptop",
-                        "URL": "https://amazon.com/macbook-pro",
-                        "Category": "laptops",
-                        "Status": "filled",
-                        "IntentLevel": "high",
-                        "Product": {
-                            "Title": "MacBook Pro M3",
-                            "Description": "Perfect for developers!",
+                        "link_text": "laptop",
+                        "url": "https://amazon.com/macbook-pro",
+                        "category": "laptops",
+                        "confidence_level": "high",
+                        "product": {
+                            "title": "MacBook Pro M3",
+                            "description": "Perfect for developers!",
                         },
                     }
                 ],
-                "Requested": 1,
-                "Returned": 1,
+                "requested": 1,
+                "returned": 1,
             },
+            "error": None,
             "meta": {
                 "request_id": "req_abc123",
                 "country": "US",
@@ -636,12 +636,13 @@ class TestIntegrationWithMockedHTTP:
         mock_response = Mock()
         mock_response.status_code = 200
         mock_response.json.return_value = {
-            "success": True,
             "data": {
-                "Offers": [],
-                "Requested": 1,
-                "Returned": 0,
+                "status": "no_offers_found",
+                "offers": [],
+                "requested": 1,
+                "returned": 0,
             },
+            "error": None,
             "meta": {"request_id": "req_xyz789"},
         }
 
@@ -665,7 +666,7 @@ class TestIntegrationWithMockedHTTP:
         mock_response = Mock()
         mock_response.status_code = 429
         mock_response.json.return_value = {
-            "success": False,
+            "data": None,
             "error": {
                 "code": "QUOTA_EXCEEDED",
                 "message": "Monthly quota reached",
@@ -699,8 +700,8 @@ class TestIntegrationWithMockedHTTP:
             Mock(
                 status_code=200,
                 json=lambda: {
-                    "success": True,
-                    "data": {"matched": False},
+                    "data": {"status": "no_offers_found", "offers": [], "requested": 1, "returned": 0},
+                    "error": None,
                     "meta": {"request_id": "req_retry"},
                 },
             ),
@@ -723,7 +724,7 @@ class TestIntegrationWithMockedHTTP:
         mock_response = Mock()
         mock_response.status_code = 403
         mock_response.json.return_value = {
-            "success": False,
+            "data": None,
             "error": {
                 "code": "FORBIDDEN",
                 "message": "Invalid API key",
@@ -787,12 +788,12 @@ class TestIntegrationWithMockedHTTP:
         mock_client = AsyncMock()
         # First call returns 500, second succeeds
         mock_client.post.side_effect = [
-            Mock(status_code=500, json=lambda: {"error": "Internal Server Error"}),
+            Mock(status_code=500, json=lambda: {"data": None, "error": {"code": "INTERNAL_ERROR", "message": "Internal Server Error"}}),
             Mock(
                 status_code=200,
                 json=lambda: {
-                    "success": True,
-                    "data": {"matched": False},
+                    "data": {"status": "no_offers_found", "offers": [], "requested": 1, "returned": 0},
+                    "error": None,
                     "meta": {"request_id": "req_500"},
                 },
             ),

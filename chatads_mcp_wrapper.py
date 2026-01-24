@@ -97,43 +97,27 @@ TOOL_VERSION = "0.1.0"
 # Pre-compiled regex patterns for performance
 _API_KEY_REDACTION = "[CHATADS_API_KEY]"
 
-# FunctionItem field handling - the 8 optional fields per OpenAPI spec (plus message = 9 total)
+# FunctionItem field handling - the 4 optional fields per OpenAPI spec (plus message = 5 total)
 _FUNCTION_ITEM_OPTIONAL_FIELDS = frozenset(
     {
         "ip",
         "country",
-        "message_analysis",
-        "fill_priority",
-        "min_intent",
-        "skip_message_analysis",
+        "quality",
         "demo",
-        "max_offers",
     }
 )
 _FIELD_TO_PAYLOAD_KEY = {
     "ip": "ip",
     "country": "country",
-    "message_analysis": "message_analysis",
-    "fill_priority": "fill_priority",
-    "min_intent": "min_intent",
-    "skip_message_analysis": "skip_message_analysis",
+    "quality": "quality",
     "demo": "demo",
-    "max_offers": "max_offers",
 }
 _FIELD_ALIAS_LOOKUP = {
-    "messageanalysis": "message_analysis",
-    "message_analysis": "message_analysis",
-    "fillpriority": "fill_priority",
-    "fill_priority": "fill_priority",
-    "minintent": "min_intent",
-    "min_intent": "min_intent",
-    "skipmessageanalysis": "skip_message_analysis",
-    "skip_message_analysis": "skip_message_analysis",
-    "maxoffers": "max_offers",
-    "max_offers": "max_offers",
+    "fillpriority": "quality",
+    "quality": "quality",
 }
-# Reserved payload keys - the 9 allowed fields per OpenAPI spec
-RESERVED_PAYLOAD_KEYS = frozenset({"message", "ip", "country", "message_analysis", "fill_priority", "min_intent", "skip_message_analysis", "demo", "max_offers"})
+# Reserved payload keys - the 5 allowed fields per OpenAPI spec
+RESERVED_PAYLOAD_KEYS = frozenset({"message", "ip", "country", "quality", "demo"})
 
 # Global HTTP client cache for connection pooling (keyed by API key)
 # Reusing connections eliminates DNS lookup, TCP handshake, and TLS negotiation overhead
@@ -647,30 +631,18 @@ def normalize_envelope(
         status_code=status_code,
     )
 
-    if raw.get("success"):
+    # Check for error (error == null means success)
+    error = raw.get("error")
+    if error is None:
         data = raw.get("data") or {}
-        raw_offers = data.get("Offers") or []
-        returned = int(data.get("Returned", 0))
-        requested = int(data.get("Requested", 1))
+        raw_offers = data.get("offers") or []
+        returned = int(data.get("returned", 0))
+        requested = int(data.get("requested", 1))
         has_offers = returned > 0
         status: Literal["success", "no_match"] = "success" if has_offers else "no_match"
 
-        offers = None
-        if raw_offers:
-            offers = [
-                {
-                    "link_text": o.get("LinkText"),
-                    "url": o.get("URL"),
-                    "category": o.get("Category"),
-                    "status": o.get("Status"),
-                    "intent_level": o.get("IntentLevel"),
-                    "intent_score": o.get("IntentScore"),
-                    "search_term": o.get("SearchTerm"),
-                    "reason": o.get("Reason"),
-                    "product": o.get("Product"),
-                }
-                for o in raw_offers
-            ]
+        # Pass offers through directly - API already returns snake_case
+        offers = raw_offers if raw_offers else None
 
         envelope = ToolEnvelope(
             status=status,
@@ -681,7 +653,7 @@ def normalize_envelope(
         )
         return envelope
 
-    error = raw.get("error") or {}
+    # Error case
     error_code = error.get("code") or "UPSTREAM_ERROR"
     normalized_reason = _normalize_reason(error.get("details", {}).get("reason")) if isinstance(
         error.get("details"), dict
@@ -822,12 +794,8 @@ async def run_chatads_message_send(
     message: str,
     ip: Optional[str] = None,
     country: Optional[str] = None,
-    message_analysis: Optional[str] = None,
-    fill_priority: Optional[str] = None,
-    min_intent: Optional[str] = None,
-    skip_message_analysis: Optional[bool] = None,
+    quality: Optional[str] = None,
     demo: Optional[bool] = None,
-    max_offers: Optional[int] = None,
     extra_fields: Optional[Dict[str, Any]] = None,
     api_key: Optional[str] = None,
 ) -> Dict[str, Any]:
@@ -838,12 +806,8 @@ async def run_chatads_message_send(
         message: User query that needs affiliate suggestions (1-5000 chars, required).
         ip: Client IP address for geo-detection (max 45 chars, optional).
         country: ISO 3166-1 alpha-2 country code for geo-targeting (e.g., 'US', 'GB'). Skips IP detection if provided.
-        message_analysis: Keyword extraction method - 'fast' (NLP ~50ms) or 'thorough' (default, LLM ~300ms).
-        fill_priority: URL resolution - 'speed' (skip Serper fallback), 'coverage' (default, full chain).
-        min_intent: Minimum purchase intent - 'any', 'low' (default), 'medium', 'high'.
-        skip_message_analysis: Skip NLP/LLM extraction and use message directly as search query (default: false).
+        quality: Resolution quality - 'fast' (vector only ~150ms), 'standard' (default ~1.4s), 'best' (Amazon scraper ~2.5s).
         demo: Demo mode flag (default: false).
-        max_offers: Maximum number of affiliate offers to return (1-2, default: 1).
         extra_fields: Additional fields (advanced usage only).
         api_key: Optional API key override; falls back to CHATADS_API_KEY env var.
     """
@@ -863,12 +827,8 @@ async def run_chatads_message_send(
                 "message": message.strip(),
                 "ip": ip,
                 "country": country,
-                "message_analysis": message_analysis,
-                "fill_priority": fill_priority,
-                "min_intent": min_intent,
-                "skip_message_analysis": skip_message_analysis,
+                "quality": quality,
                 "demo": demo,
-                "max_offers": max_offers,
                 "extra_fields": extra_fields,
             }
         )
