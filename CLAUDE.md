@@ -5,7 +5,7 @@ Model Context Protocol (MCP) server that exposes ChatAds as a tool for AI assist
 ## Package Info
 
 - **Package name**: `chatads-mcp-wrapper` (on PyPI)
-- **Language**: Python 3.8+
+- **Language**: Python 3.10+
 - **Protocol**: MCP (Model Context Protocol)
 
 ## Purpose

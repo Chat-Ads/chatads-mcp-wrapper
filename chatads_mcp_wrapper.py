@@ -12,9 +12,8 @@ Usage:
          - CHATADS_API_BASE_URL (default: https://api.getchatads.com)
          - CHATADS_API_ENDPOINT (default: /v1/chatads/messages)
          - CHATADS_MCP_MAX_RETRIES (default: 3)
-         - CHATADS_MCP_TIMEOUT (seconds, default: 15)
+         - CHATADS_MCP_TIMEOUT (seconds, default: 10)
          - CHATADS_MCP_BACKOFF (seconds, default: 0.6)
-         - CHATADS_MAX_REQUEST_SIZE (bytes, default: 10240)
          - CHATADS_CIRCUIT_BREAKER_THRESHOLD (failures before opening, default: 5)
          - CHATADS_CIRCUIT_BREAKER_TIMEOUT (seconds to stay open, default: 60)
          - CHATADS_QUOTA_WARNING_THRESHOLD (percentage, default: 0.9)
@@ -35,11 +34,14 @@ import threading
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from enum import Enum
 from typing import Any, Callable, Dict, Literal, Optional
 
 import httpx
 from fastmcp import FastMCP
+from fastmcp.tools import Tool
+from fastmcp.tools.tool_transform import ArgTransform
 from pydantic import BaseModel, ConfigDict, Field
 
 LOGGER = logging.getLogger("chatads.mcp")
@@ -88,36 +90,28 @@ DEFAULT_ENDPOINT = os.getenv("CHATADS_API_ENDPOINT", "/v1/chatads/messages")
 DEFAULT_TIMEOUT = float(os.getenv("CHATADS_MCP_TIMEOUT", "10"))  # Reduced from 15s to allow faster retries
 DEFAULT_MAX_RETRIES = int(os.getenv("CHATADS_MCP_MAX_RETRIES", "3"))
 BACKOFF_SECONDS = float(os.getenv("CHATADS_MCP_BACKOFF", "0.6"))
-MAX_REQUEST_SIZE_BYTES = int(os.getenv("CHATADS_MAX_REQUEST_SIZE", "10240"))  # 10KB default
+RETRYABLE_STATUSES = frozenset({408, 429, 500, 502, 503, 504})
 CIRCUIT_BREAKER_THRESHOLD = int(os.getenv("CHATADS_CIRCUIT_BREAKER_THRESHOLD", "5"))
 CIRCUIT_BREAKER_TIMEOUT = int(os.getenv("CHATADS_CIRCUIT_BREAKER_TIMEOUT", "60"))
 QUOTA_WARNING_THRESHOLD = float(os.getenv("CHATADS_QUOTA_WARNING_THRESHOLD", "0.9"))  # Warn at 90%
-TOOL_VERSION = "0.1.0"
+try:
+    from importlib.metadata import version as _pkg_version
+    TOOL_VERSION = _pkg_version("chatads-mcp-wrapper")
+except Exception:
+    TOOL_VERSION = "0.1.11"
 
 # Pre-compiled regex patterns for performance
 _API_KEY_REDACTION = "[CHATADS_API_KEY]"
 
-# FunctionItem field handling - the 4 optional fields per OpenAPI spec (plus message = 5 total)
-_FUNCTION_ITEM_OPTIONAL_FIELDS = frozenset(
-    {
-        "ip",
-        "country",
-        "quality",
-        "demo",
-    }
-)
-_FIELD_TO_PAYLOAD_KEY = {
+# FunctionItem field handling - the 3 optional fields per OpenAPI spec (plus message = 4 total)
+_FIELD_NORMALIZE = {
     "ip": "ip",
     "country": "country",
     "quality": "quality",
-    "demo": "demo",
-}
-_FIELD_ALIAS_LOOKUP = {
     "fillpriority": "quality",
-    "quality": "quality",
 }
-# Reserved payload keys - the 5 allowed fields per OpenAPI spec
-RESERVED_PAYLOAD_KEYS = frozenset({"message", "ip", "country", "quality", "demo"})
+# Reserved payload keys - the 4 allowed fields per OpenAPI spec
+RESERVED_PAYLOAD_KEYS = frozenset({"message", "ip", "country", "quality"})
 
 # Global HTTP client cache for connection pooling (keyed by API key)
 # Reusing connections eliminates DNS lookup, TCP handshake, and TLS negotiation overhead
@@ -149,6 +143,22 @@ def _emit_metric(metric_name: str, value: float, tags: Optional[Dict[str, str]] 
             _metric_callback(metric_name, value, tags or {})
         except Exception as exc:
             LOGGER.warning("Failed to emit metric %s: %s", metric_name, exc)
+
+
+def _parse_retry_after(value: Optional[str]) -> Optional[float]:
+    """Parse a Retry-After header into seconds. Returns None if absent or unparseable."""
+    if not value:
+        return None
+    try:
+        return max(0.0, float(value))
+    except (ValueError, TypeError):
+        pass
+    try:
+        dt = parsedate_to_datetime(value)
+        delta = (dt - datetime.now(timezone.utc)).total_seconds()
+        return max(0.0, delta)
+    except Exception:
+        return None
 
 
 class CircuitState(Enum):
@@ -323,7 +333,7 @@ class ChatAdsClient:
                         # Note: AsyncClient.aclose() should be awaited, but we're in sync context
                         # This is acceptable - httpx handles it gracefully
                         oldest_client.close()
-                        LOGGER.info("Evicted cached HTTP client for key: %s (cache full)", oldest_key[:20] + "...")
+                        LOGGER.info("Evicted oldest cached HTTP client (cache full, max=%d)", MAX_CACHED_CLIENTS)
                     except Exception as exc:
                         LOGGER.warning("Failed to close evicted client: %s", exc)
 
@@ -418,19 +428,26 @@ class ChatAdsClient:
                 if self.config.enable_circuit_breaker and ChatAdsClient._circuit_breaker:
                     ChatAdsClient._circuit_breaker.record_failure()
             else:
-                if response.status_code >= 500:
+                if response.status_code in RETRYABLE_STATUSES:
+                    if self.config.enable_circuit_breaker and ChatAdsClient._circuit_breaker:
+                        ChatAdsClient._circuit_breaker.record_failure()
                     if attempt < self.config.max_retries:
+                        parsed_retry = _parse_retry_after(response.headers.get("retry-after"))
+                        if parsed_retry is not None:
+                            retry_delay = parsed_retry
+                        else:
+                            retry_delay = delay
+                            delay *= 2
                         LOGGER.warning(
                             "ChatAds returned %s, retrying (attempt %s/%s)",
                             response.status_code,
                             attempt,
                             self.config.max_retries,
                         )
-                        if self.config.enable_circuit_breaker and ChatAdsClient._circuit_breaker:
-                            ChatAdsClient._circuit_breaker.record_failure()
+                        await asyncio.sleep(retry_delay)
                         continue
                     raise ChatAdsAPIError(
-                        "ChatAds returned an internal error.",
+                        "ChatAds returned a retryable error.",
                         code="UPSTREAM_UNAVAILABLE",
                         status_code=response.status_code,
                     )
@@ -438,6 +455,8 @@ class ChatAdsClient:
                 try:
                     data = response.json()
                 except ValueError as exc:
+                    if self.config.enable_circuit_breaker and ChatAdsClient._circuit_breaker:
+                        ChatAdsClient._circuit_breaker.record_failure()
                     raise ChatAdsAPIError(
                         "ChatAds returned invalid JSON.",
                         code="BAD_RESPONSE",
@@ -472,9 +491,8 @@ ERROR_HINTS = {
     "REQUEST_TOO_LARGE": "Request payload exceeds maximum size limit. Reduce message length or parameters.",
     "CONTENT_BLOCKED": "Message contains a keyword the user has blocked.",
     "RATE_LIMIT_UNAVAILABLE": "Usage enforcement temporarily unavailable—retry soon.",
-    "MINUTE_QUOTA_EXCEEDED": "Too many requests this minute. Wait until the next minute.",
-    "DAILY_QUOTA_EXCEEDED": "Daily request quota reached. Try tomorrow or upgrade.",
-    "QUOTA_EXCEEDED": "Monthly quota reached. Add billing info or wait for reset.",
+    "DAILY_LIMIT_EXCEEDED": "Daily request limit reached. Try tomorrow or upgrade.",
+    "MONTHLY_LIMIT_EXCEEDED": "Monthly limit reached. Add billing info or wait for reset.",
     "CIRCUIT_BREAKER_OPEN": "API is experiencing issues. Circuit breaker is protecting against failed requests. Retry later.",
 }
 
@@ -517,11 +535,7 @@ def _normalize_reason(raw_reason: Optional[str]) -> Optional[str]:
 
 
 def _summarize_usage(raw_usage: Any) -> Optional[Dict[str, Any]]:
-    """Summarize usage info from API response.
-
-    Note: Per CHA-326, minute-level rate limits were removed from the API.
-    Only daily and monthly limits are tracked now.
-    """
+    """Summarize usage info from API response."""
     if not isinstance(raw_usage, dict):
         return None
     summary = {
@@ -545,9 +559,6 @@ def _check_quota_warnings(usage_summary: Optional[Dict[str, Any]]) -> Optional[s
 
     Returns warning string if user is close to quota limits, None otherwise.
     Uses real-time data from backend, so no client-side state management needed.
-
-    Note: Per CHA-326, minute-level rate limits were removed from the API.
-    Only daily and monthly limits are checked now.
     """
     if not usage_summary:
         return None
@@ -670,7 +681,6 @@ def normalize_envelope(
 
 def _validate_inputs(
     message: str,
-    api_key: str,
 ) -> None:
     """
     Validate all inputs before making API request.
@@ -682,14 +692,6 @@ def _validate_inputs(
             "Message cannot be empty.",
             code="INVALID_INPUT",
             status_code=400,
-        )
-
-    # API key validation handled server-side; only ensure it's non-empty string.
-    if not api_key or not isinstance(api_key, str):
-        raise ChatAdsAPIError(
-            "API key is missing. Provide CHATADS_API_KEY or pass api_key.",
-            code="CONFIGURATION_ERROR",
-            status_code=500,
         )
 
 
@@ -714,10 +716,7 @@ def _build_request_payload(kwargs: Dict[str, Any]) -> Dict[str, Any]:
         )
 
     def _normalize_field_name(raw: str) -> Optional[str]:
-        lowered = raw.lower()
-        if lowered in _FUNCTION_ITEM_OPTIONAL_FIELDS:
-            return lowered
-        return _FIELD_ALIAS_LOOKUP.get(lowered)
+        return _FIELD_NORMALIZE.get(raw.lower())
 
     for key, value in kwargs.items():
         if key in {"message", "extra_fields"}:
@@ -733,12 +732,14 @@ def _build_request_payload(kwargs: Dict[str, Any]) -> Dict[str, Any]:
     for key, value in provided_extra_fields.items():
         if value is None:
             continue
-        extra_fields[key] = value
+        normalized = _normalize_field_name(key)
+        if normalized:
+            known_fields[normalized] = value
+        else:
+            extra_fields[key] = value
 
     payload: Dict[str, Any] = {"message": message.strip()}
-    for field_name, value in known_fields.items():
-        payload_key = _FIELD_TO_PAYLOAD_KEY[field_name]
-        payload[payload_key] = value
+    payload.update(known_fields)
 
     conflicts = RESERVED_PAYLOAD_KEYS.intersection(extra_fields.keys())
     if conflicts:
@@ -795,7 +796,6 @@ async def run_chatads_message_send(
     ip: Optional[str] = None,
     country: Optional[str] = None,
     quality: Optional[str] = None,
-    demo: Optional[bool] = None,
     extra_fields: Optional[Dict[str, Any]] = None,
     api_key: Optional[str] = None,
 ) -> Dict[str, Any]:
@@ -807,7 +807,6 @@ async def run_chatads_message_send(
         ip: Client IP address for geo-detection (max 45 chars, optional).
         country: ISO 3166-1 alpha-2 country code for geo-targeting (e.g., 'US', 'GB'). Skips IP detection if provided.
         quality: Resolution quality - 'fast' (vector only ~150ms), 'standard' (default ~1.4s), 'best' (Amazon scraper ~2.5s).
-        demo: Demo mode flag (default: false).
         extra_fields: Additional fields (advanced usage only).
         api_key: Optional API key override; falls back to CHATADS_API_KEY env var.
     """
@@ -817,10 +816,7 @@ async def run_chatads_message_send(
         resolved_api_key = _resolve_api_key(api_key)
 
         # Validate inputs before making any API calls (fail fast)
-        _validate_inputs(
-            message=message.strip(),
-            api_key=resolved_api_key,
-        )
+        _validate_inputs(message=message.strip())
 
         payload = _build_request_payload(
             {
@@ -828,7 +824,6 @@ async def run_chatads_message_send(
                 "ip": ip,
                 "country": country,
                 "quality": quality,
-                "demo": demo,
                 "extra_fields": extra_fields,
             }
         )
@@ -856,9 +851,18 @@ async def run_chatads_message_send(
             await client.aclose()
 
 
+chatads_message_send = run_chatads_message_send
 run_chatads_affiliate_lookup = run_chatads_message_send  # Backward compatibility alias
-chatads_message_send = mcp.tool()(run_chatads_message_send)
 chatads_affiliate_lookup = chatads_message_send  # Backward compatibility alias
+
+# Register with MCP, hiding api_key from the LLM-visible tool schema
+_chatads_tool = Tool.from_tool(
+    Tool.from_function(run_chatads_message_send),
+    transform_args={
+        "api_key": ArgTransform(hide=True, default=None),
+    },
+)
+mcp.add_tool(_chatads_tool)
 
 def main() -> None:
     """Main entry point with support for multiple transport modes."""
@@ -870,11 +874,8 @@ def main() -> None:
         LOGGER.info("Starting ChatAds MCP wrapper in SSE mode (version %s)", TOOL_VERSION)
         # Note: SSE mode is handled by the FastAPI app in chatads-code/api/mcp_server.py
         # This is just a placeholder for future standalone SSE server support
-        print("SSE mode is handled by the FastAPI deployment.")
-        print("Deploy to Modal using: modal deploy chatads_api.py")
-        print("MCP endpoints will be available at:")
-        print("  - SSE: https://your-app.modal.run/mcp/sse")
-        print("  - Messages: https://your-app.modal.run/mcp/messages")
+        print("SSE mode is handled by the Go API on Fly.io.")
+        print("MCP endpoint: https://api.getchatads.com/mcp/mcp")
         sys.exit(0)
     elif "--stdio" in sys.argv or len(sys.argv) == 1:
         # stdio mode for Claude Desktop (local)

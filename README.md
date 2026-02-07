@@ -17,10 +17,9 @@ This directory houses the Model Context Protocol (MCP) wrapper that exposes the 
   - Optional overrides:
     - `CHATADS_API_BASE_URL` (default: https://api.getchatads.com)
     - `CHATADS_API_ENDPOINT` (default: /v1/chatads/messages)
-    - `CHATADS_MCP_TIMEOUT` (default: 15 seconds)
+    - `CHATADS_MCP_TIMEOUT` (default: 10 seconds)
     - `CHATADS_MCP_MAX_RETRIES` (default: 3)
     - `CHATADS_MCP_BACKOFF` (default: 0.6 seconds)
-    - `CHATADS_MAX_REQUEST_SIZE` (default: 10240 bytes / 10KB)
     - `CHATADS_CIRCUIT_BREAKER_THRESHOLD` (default: 5 failures before opening)
     - `CHATADS_CIRCUIT_BREAKER_TIMEOUT` (default: 60 seconds)
     - `CHATADS_QUOTA_WARNING_THRESHOLD` (default: 0.9 / 90%)
@@ -93,19 +92,17 @@ chatads_message_send(
     ip?: str,                                              # IPv4/IPv6 address for country detection (max 45 chars)
     country?: str,                                         # Country code (e.g., 'US'). If provided, skips IP-based country detection
     quality?: "fast" | "standard" | "best",                # Resolution quality. 'fast', 'standard' (default), or 'best'
-    api_key?: str                                          # Optional: override env var
+    # api_key is accepted via CHATADS_API_KEY env var (hidden from tool schema)
 ) -> {
     status: "success" | "no_match" | "error",
-    response_status?: "filled" | "partial_fill" | "no_offers_found" | "internal_error",  # API response status
     offers?: [
         {
             link_text: str,                                # Text to use for affiliate link
             url: str,                                      # Affiliate URL (always populated)
-            category?: str,                                # Product category
-            intent_level: str,                             # Intent classification
-            intent_score?: float,                          # Intent score (0.0-1.0)
+            confidence_level: str,                         # Confidence classification
+            confidence_score?: float,                      # Confidence score (0.0-1.0)
             search_term?: str,                             # Search term used
-            product?: { Title?: str, Description?: str }   # Product metadata
+            product?: { title?: str, description?: str }   # Product metadata
         }
     ],
     offers_requested?: int,
@@ -211,11 +208,11 @@ Emitted metrics:
 | --- | --- | --- |
 | `CONFIGURATION_ERROR` | Missing `CHATADS_API_KEY` | Export the key or pass `api_key` argument. |
 | `FORBIDDEN` / `UNAUTHORIZED` | Invalid or revoked key | Verify the key in Supabase / dashboard; rotate if needed. |
-| `DAILY_QUOTA_EXCEEDED` / `QUOTA_EXCEEDED` | Hitting daily or monthly caps | Respect `metadata.notes` and retry after the implied window or upgrade the plan. |
+| `DAILY_LIMIT_EXCEEDED` / `MONTHLY_LIMIT_EXCEEDED` | Hitting daily or monthly caps | Wait until limit resets (midnight UTC for daily, 1st of month for monthly) or upgrade. |
 | `CIRCUIT_BREAKER_OPEN` | Too many consecutive failures | Circuit breaker is protecting against failed requests. Wait 60 seconds. |
 | `UPSTREAM_UNAVAILABLE` | Network outage or repeated 5xx | Wait/backoff; confirm API health; consider raising `CHATADS_MCP_MAX_RETRIES`. |
 | `INVALID_INPUT` | Empty message or <2 words | Provide more descriptive user text; sanitize before sending. |
-| `REQUEST_TOO_LARGE` | Payload exceeds size limit | Reduce message length or increase `CHATADS_MAX_REQUEST_SIZE`. |
+| `REQUEST_TOO_LARGE` | Payload exceeds size limit | Reduce message length or extra_fields size. |
 
 Enable debug logging if deeper insight is needed:
 

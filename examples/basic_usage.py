@@ -41,7 +41,6 @@ async def example_1_basic_lookup():
     if result['matched']:
         print(f"\n✅ Found affiliate match!")
         print(f"  Product: {result['product']}")
-        print(f"  Category: {result['category']}")
         print(f"  Link: {result['affiliate_link']}")
         print(f"  Message: {result.get('affiliate_message', 'N/A')}")
     else:
@@ -58,7 +57,6 @@ async def example_1_basic_lookup():
         print(f"\n💰 Usage:")
         print(f"  Monthly: {usage['monthly']['used']}/{usage['monthly']['limit']}")
         print(f"  Daily: {usage['daily']['used']}/{usage['daily']['limit']}")
-        print(f"  Minute: {usage['minute']['used']}/{usage['minute']['limit']}")
 
     print()
 
@@ -81,7 +79,6 @@ async def example_2_with_geo_targeting():
 
     if result['matched']:
         print(f"Product: {result['product']}")
-        print(f"Category: {result['category']}")
 
     print(f"\n🌍 Geo Info:")
     print(f"  Country: {result['metadata'].get('country', 'N/A')}")
@@ -193,7 +190,6 @@ async def example_6_with_user_context():
 
     if result['matched']:
         print(f"Product: {result['product']}")
-        print(f"Category: {result['category']}")
 
     print()
 
@@ -225,11 +221,6 @@ async def example_7_quota_monitoring():
         daily_pct = (daily['used'] / daily['limit']) * 100 if daily['limit'] else 0
         print(f"\n  Daily:")
         print(f"    Used: {daily['used']}/{daily['limit']} ({daily_pct:.1f}%)")
-
-        # Minute quota
-        minute = usage['minute']
-        print(f"\n  Minute:")
-        print(f"    Used: {minute['used']}/{minute['limit']}")
 
         # Account info
         print(f"\n  Account:")

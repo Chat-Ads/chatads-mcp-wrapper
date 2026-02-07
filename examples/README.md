@@ -62,7 +62,6 @@ Matched: True
 
 ✅ Found affiliate match!
   Product: MacBook Pro M3
-  Category: laptops
   Link: https://amazon.com/...
   Message: Perfect for developers and power users
 

@@ -71,53 +71,25 @@ class TestInputValidation:
     """Test input validation for fast failure.
 
     Note: Client-side validation is minimal. The MCP wrapper only validates
-    that message and api_key are non-empty. Other validation (IP, country, etc.)
-    is done server-side by the ChatAds API.
+    that message is non-empty. API key validation is handled by _resolve_api_key.
     """
 
     def test_valid_inputs(self):
-        # Should not raise
-        _validate_inputs(
-            message="best laptop for coding",
-            api_key="mock_api_key_1234567890abcdefghij",
-        )
+        _validate_inputs(message="best laptop for coding")
 
     def test_valid_inputs_minimal(self):
-        # Minimal valid inputs (only required params)
-        _validate_inputs(
-            message="test message",
-            api_key="mock_api_key_1234567890abcdefghij",
-        )
+        _validate_inputs(message="test message")
 
-    # Message validation tests
     def test_empty_message(self):
         with pytest.raises(ChatAdsAPIError) as exc_info:
-            _validate_inputs("", "mock_api_key_1234567890abcdefghij")
+            _validate_inputs("")
         assert exc_info.value.code == "INVALID_INPUT"
         assert "empty" in str(exc_info.value).lower()
 
     def test_whitespace_only_message(self):
         with pytest.raises(ChatAdsAPIError) as exc_info:
-            _validate_inputs("   ", "mock_api_key_1234567890abcdefghij")
+            _validate_inputs("   ")
         assert exc_info.value.code == "INVALID_INPUT"
-
-    # Note: Message length/word count validation is done server-side
-    # The client just validates non-empty message and api_key
-
-    # API key validation tests
-    def test_valid_api_key_generic(self):
-        # Should not raise
-        _validate_inputs("test message", "my_api_key_value")
-
-    def test_invalid_api_key_empty(self):
-        with pytest.raises(ChatAdsAPIError) as exc_info:
-            _validate_inputs("test message", "")
-        assert exc_info.value.code == "CONFIGURATION_ERROR"
-
-    def test_invalid_api_key_none(self):
-        with pytest.raises(ChatAdsAPIError) as exc_info:
-            _validate_inputs("test message", None)
-        assert exc_info.value.code == "CONFIGURATION_ERROR"
 
 
 class TestReasonNormalization:
@@ -259,7 +231,6 @@ class TestEnvelopeNormalization:
                     {
                         "link_text": "laptop",
                         "url": "https://amazon.com/macbook",
-                        "category": "laptops",
                         "confidence_level": "high",
                         "product": {
                             "title": "MacBook Pro",
@@ -375,6 +346,52 @@ class TestChatAdsClient:
 
         assert exc_info.value.code == "UPSTREAM_UNAVAILABLE"
         assert mock_client.post.call_count == 2
+
+    @pytest.mark.asyncio
+    @patch("chatads_mcp_wrapper.asyncio.sleep", new_callable=AsyncMock)
+    @patch("chatads_mcp_wrapper.httpx.AsyncClient")
+    async def test_fetch_500_retries_use_backoff(self, mock_client_class, mock_sleep):
+        """500 retries should sleep with exponential backoff, not fire back-to-back."""
+        mock_response = Mock()
+        mock_response.status_code = 500
+        mock_response.json.return_value = {"error": "Internal server error"}
+
+        mock_client = AsyncMock()
+        mock_client.post.side_effect = [mock_response, mock_response, mock_response]
+        mock_client_class.return_value = mock_client
+
+        config = ChatAdsClientConfig(max_retries=3, backoff_seconds=0.5)
+        client = ChatAdsClient("mock_api_key_123", config)
+
+        with pytest.raises(ChatAdsAPIError):
+            await client.fetch({"message": "test"})
+
+        # 3 attempts = 2 sleeps (between attempts 1→2 and 2→3)
+        assert mock_sleep.call_count == 2
+        # Exponential backoff: 0.5, then 1.0
+        mock_sleep.assert_any_call(0.5)
+        mock_sleep.assert_any_call(1.0)
+
+    @pytest.mark.asyncio
+    @patch("chatads_mcp_wrapper.httpx.AsyncClient")
+    async def test_fetch_500_final_attempt_records_cb_failure(self, mock_client_class):
+        """Circuit breaker should record failure on every 500, including the final attempt."""
+        mock_response = Mock()
+        mock_response.status_code = 500
+        mock_response.json.return_value = {"error": "Internal server error"}
+
+        mock_client = AsyncMock()
+        mock_client.post.side_effect = [mock_response, mock_response]
+        mock_client_class.return_value = mock_client
+
+        config = ChatAdsClientConfig(max_retries=2, backoff_seconds=0.0, enable_circuit_breaker=True)
+        client = ChatAdsClient("mock_api_key_123", config)
+
+        with pytest.raises(ChatAdsAPIError):
+            await client.fetch({"message": "test"})
+
+        # Both attempts (including final) should record failure = 2 total
+        assert ChatAdsClient._circuit_breaker.failure_count == 2
 
 
 class TestChatAdsAPIError:
@@ -587,7 +604,6 @@ class TestIntegrationWithMockedHTTP:
                     {
                         "link_text": "laptop",
                         "url": "https://amazon.com/macbook-pro",
-                        "category": "laptops",
                         "confidence_level": "high",
                         "product": {
                             "title": "MacBook Pro M3",
@@ -683,8 +699,8 @@ class TestIntegrationWithMockedHTTP:
         result = await run_chatads_message_send("best laptop")
 
         assert result["status"] == "error"
-        assert result["error_code"] == "QUOTA_EXCEEDED"
-        assert "Monthly quota" in result["error_message"]
+        assert result["error_code"] == "UPSTREAM_UNAVAILABLE"
+        assert "retryable error" in result["error_message"]
 
     @pytest.mark.asyncio
     @patch("chatads_mcp_wrapper.httpx.AsyncClient")
