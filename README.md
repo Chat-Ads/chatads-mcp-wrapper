@@ -91,7 +91,7 @@ chatads_message_send(
     message: str,                                          # Required: 1-5000 chars
     ip?: str,                                              # IPv4/IPv6 address for country detection (max 45 chars)
     country?: str,                                         # Country code (e.g., 'US'). If provided, skips IP-based country detection
-    quality?: "fast" | "standard" | "best",                # Resolution quality. 'fast', 'standard' (default), or 'best'
+    input_type?: str,                                      # Content type: 'text' (default), 'image_url', or 'image_file'
     # api_key is accepted via CHATADS_API_KEY env var (hidden from tool schema)
 ) -> {
     status: "success" | "no_match" | "error",
@@ -99,7 +99,6 @@ chatads_message_send(
         {
             link_text: str,                                # Text to use for affiliate link
             url: str,                                      # Affiliate URL (always populated)
-            confidence_level: str,                         # Confidence classification
             confidence_score?: float,                      # Confidence score (0.0-1.0)
             search_term?: str,                             # Search term used
             product?: { title?: str, description?: str }   # Product metadata

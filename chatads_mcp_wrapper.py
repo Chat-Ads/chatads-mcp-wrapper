@@ -103,15 +103,16 @@ except Exception:
 # Pre-compiled regex patterns for performance
 _API_KEY_REDACTION = "[CHATADS_API_KEY]"
 
-# FunctionItem field handling - the 3 optional fields per OpenAPI spec (plus message = 4 total)
+# FunctionItem field handling - optional fields per OpenAPI spec (plus message)
 _FIELD_NORMALIZE = {
     "ip": "ip",
     "country": "country",
     "quality": "quality",
     "fillpriority": "quality",
+    "input_type": "input_type",
 }
-# Reserved payload keys - the 4 allowed fields per OpenAPI spec
-RESERVED_PAYLOAD_KEYS = frozenset({"message", "ip", "country", "quality"})
+# Reserved payload keys - the allowed fields per OpenAPI spec
+RESERVED_PAYLOAD_KEYS = frozenset({"message", "ip", "country", "quality", "input_type"})
 
 # Global HTTP client cache for connection pooling (keyed by API key)
 # Reusing connections eliminates DNS lookup, TCP handshake, and TLS negotiation overhead
@@ -796,6 +797,7 @@ async def run_chatads_message_send(
     ip: Optional[str] = None,
     country: Optional[str] = None,
     quality: Optional[str] = None,
+    input_type: Optional[str] = None,
     extra_fields: Optional[Dict[str, Any]] = None,
     api_key: Optional[str] = None,
 ) -> Dict[str, Any]:
@@ -807,6 +809,7 @@ async def run_chatads_message_send(
         ip: Client IP address for geo-detection (max 45 chars, optional).
         country: ISO 3166-1 alpha-2 country code for geo-targeting (e.g., 'US', 'GB'). Skips IP detection if provided.
         quality: Resolution quality - 'fast' (vector only ~150ms), 'standard' (default ~1.4s), 'best' (Amazon scraper ~2.5s).
+        input_type: Content type - 'text' (default), 'image_url' (analyze image from URL), 'image_file' (analyze uploaded image).
         extra_fields: Additional fields (advanced usage only).
         api_key: Optional API key override; falls back to CHATADS_API_KEY env var.
     """
@@ -824,6 +827,7 @@ async def run_chatads_message_send(
                 "ip": ip,
                 "country": country,
                 "quality": quality,
+                "input_type": input_type,
                 "extra_fields": extra_fields,
             }
         )
